@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#eef1f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#171c22" media="(prefers-color-scheme: dark)">
+<title>Übersetzer</title>
+<style>
+:root{
+  --paper:#eef1f5;
+  --card:#ffffff;
+  --ink:#16202e;
+  --soft:#5b6878;
+  --rule:#d5dce4;
+  --field:#f7f9fb;
+  --btn-bg:#16202e;
+  --btn-ink:#f7f9fb;
+  --der:#1e6fd9;
+  --die:#d0342c;
+  --das:#1a8f4f;
+  --plural:#c47f11;
+  --warn:#a8410f;
+  --serif:Georgia,"Noto Serif","Times New Roman",serif;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#171c22;
+    --card:#1f252d;
+    --ink:#e7ecf2;
+    --soft:#98a5b4;
+    --rule:#2d3641;
+    --field:#191f26;
+    --btn-bg:#e7ecf2;
+    --btn-ink:#171c22;
+    --der:#6aa9ff;
+    --die:#ff7a70;
+    --das:#4cc07f;
+    --plural:#efb03f;
+    --warn:#f0a06a;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:16px;
+  line-height:1.5;
+  padding:16px 14px calc(32px + env(safe-area-inset-bottom));
+  max-width:640px;
+  margin:0 auto;
+  -webkit-text-size-adjust:100%;
+}
+h1{
+  font-family:var(--serif);
+  font-size:30px;
+  font-weight:400;
+  letter-spacing:.01em;
+  margin:0 0 2px;
+}
+.tagline{color:var(--soft);font-size:13px;margin:0 0 20px}
+
+.bar{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.pills{display:flex;gap:4px;flex:1;background:var(--card);border:1px solid var(--rule);border-radius:9px;padding:3px}
+.pill{
+  flex:1;border:0;background:transparent;color:var(--soft);
+  font:inherit;font-size:14px;padding:7px 0;border-radius:6px;cursor:pointer;
+}
+.pill[aria-pressed="true"]{background:var(--btn-bg);color:var(--btn-ink)}
+.swap{
+  border:1px solid var(--rule);background:var(--card);color:var(--ink);
+  width:40px;height:40px;border-radius:9px;cursor:pointer;font-size:17px;flex:none;
+}
+.swap:active{transform:scale(.94)}
+
+.modes{display:flex;gap:18px;border-bottom:1px solid var(--rule);margin:18px 0 12px}
+.mode{
+  border:0;background:transparent;color:var(--soft);font:inherit;font-size:15px;
+  padding:0 0 9px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;
+}
+.mode[aria-pressed="true"]{color:var(--ink);border-bottom-color:var(--ink)}
+
+textarea{
+  width:100%;min-height:110px;resize:none;
+  background:var(--field);color:var(--ink);
+  border:1px solid var(--rule);border-radius:11px;
+  padding:13px 14px;font-family:var(--serif);font-size:18px;line-height:1.45;
+}
+textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:2px}
+.meta{display:flex;justify-content:space-between;align-items:center;margin:8px 0 0;gap:10px}
+.count{color:var(--soft);font-size:12px;font-variant-numeric:tabular-nums}
+.count.over{color:var(--die)}
+.actions{display:flex;gap:8px}
+.go{
+  background:var(--btn-bg);color:var(--btn-ink);border:0;border-radius:9px;
+  font:inherit;font-size:15px;padding:10px 22px;cursor:pointer;
+}
+.go[disabled]{opacity:.45;cursor:default}
+.ghost{
+  background:transparent;color:var(--soft);border:1px solid var(--rule);
+  border-radius:9px;font:inherit;font-size:14px;padding:10px 14px;cursor:pointer;
+}
+
+#status{margin-top:18px;color:var(--soft);font-size:14px;min-height:0}
+#status.error{color:var(--die)}
+
+#result{margin-top:18px}
+.out{
+  background:var(--card);border:1px solid var(--rule);border-radius:11px;
+  padding:16px 16px 12px;
+}
+.out p.text{font-family:var(--serif);font-size:19px;line-height:1.55;margin:0;white-space:pre-wrap}
+.tools{display:flex;gap:6px;margin-top:14px;padding-top:10px;border-top:1px solid var(--rule)}
+.tool{
+  background:transparent;border:1px solid var(--rule);color:var(--soft);
+  border-radius:7px;font:inherit;font-size:13px;padding:6px 11px;cursor:pointer;
+}
+
+/* — словарная статья — */
+.entry{background:var(--card);border:1px solid var(--rule);border-radius:11px;padding:18px 16px 12px}
+.head{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px}
+.article{font-family:var(--serif);font-size:24px;font-weight:700}
+.article.der{color:var(--der)} .article.die{color:var(--die)}
+.article.das{color:var(--das)} .article.pl{color:var(--plural)}
+.word{font-family:var(--serif);font-size:28px;line-height:1.15}
+.pos{color:var(--soft);font-size:14px;font-style:italic}
+.forms{color:var(--soft);font-size:14px;margin-top:4px}
+.sense{margin-top:16px;display:flex;gap:10px}
+.num{color:var(--soft);font-size:14px;font-variant-numeric:tabular-nums;padding-top:3px}
+.sense .body{flex:1}
+.tr{font-family:var(--serif);font-size:20px}
+.note{color:var(--soft);font-size:14px;margin-top:2px}
+.ex{border-left:2px solid var(--rule);padding-left:11px;margin-top:9px}
+.ex .src{font-family:var(--serif);font-size:16px}
+.ex .dst{color:var(--soft);font-size:14px}
+.grid{margin:18px 0 0;padding-top:12px;border-top:1px solid var(--rule);display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:14px}
+.grid dt{color:var(--soft)}
+.grid dd{margin:0}
+.syn{margin-top:14px;font-size:14px;color:var(--soft)}
+.caution{margin-top:14px;font-size:14px;color:var(--warn);border-left:2px solid var(--warn);padding-left:11px}
+
+#history{margin-top:30px}
+#history h2{font-size:13px;font-weight:600;color:var(--soft);margin:0 0 8px}
+.hist-item{
+  display:block;width:100%;text-align:left;background:transparent;border:0;
+  border-top:1px solid var(--rule);color:var(--ink);font:inherit;font-size:15px;
+  padding:10px 0;cursor:pointer;
+}
+.hist-item span{color:var(--soft);font-size:12px;margin-left:8px}
+.hist-clear{margin-top:10px;background:transparent;border:0;color:var(--soft);font:inherit;font-size:13px;text-decoration:underline;cursor:pointer;padding:0}
+.hidden{display:none}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<h1>Übersetzer</h1>
+<p class="tagline">Немецкий, русский, украинский — перевод и словарь</p>
+
+<div class="bar">
+  <div class="pills" id="fromPills" role="group" aria-label="Язык оригинала"></div>
+  <button class="swap" id="btnSwap" type="button" title="Поменять языки" aria-label="Поменять языки местами">⇄</button>
+  <div class="pills" id="toPills" role="group" aria-label="Язык перевода"></div>
+</div>
+
+<div class="modes">
+  <button class="mode" id="modeText" type="button" aria-pressed="true">Перевод</button>
+  <button class="mode" id="modeDict" type="button" aria-pressed="false">Словарь</button>
+</div>
+
+<textarea id="input" placeholder="Текст для перевода" autocapitalize="sentences" spellcheck="false"></textarea>
+
+<div class="meta">
+  <span class="count" id="count">0 / 5000</span>
+  <span class="actions">
+    <button class="ghost" id="btnClear" type="button">Очистить</button>
+    <button class="go" id="btnGo" type="button">Перевести</button>
+  </span>
+</div>
+
+<div id="status"></div>
+<div id="result"></div>
+
+<div id="history" class="hidden">
+  <h2>Недавнее</h2>
+  <div id="histList"></div>
+  <button class="hist-clear" id="btnHistClear" type="button">Очистить историю</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var LANGS = [
+    { code: 'de', label: 'DE', voice: 'de-DE' },
+    { code: 'ru', label: 'RU', voice: 'ru-RU' },
+    { code: 'uk', label: 'UA', voice: 'uk-UA' }
+  ];
+  var LIMIT = { text: 5000, dict: 120 };
+  var PLACEHOLDER = { text: 'Текст для перевода', dict: 'Слово или короткая фраза' };
+  var CACHE_KEY = 'ueb_cache';
+  var HIST_KEY = 'ueb_history';
+  var PREF_KEY = 'ueb_prefs';
+  var CACHE_MAX = 150;
+  var HIST_MAX = 25;
+
+  var state = { from: 'de', to: 'ru', mode: 'text' };
+  var busy = false;
+  var lastOutput = { text: '', lang: 'ru' };
+
+  var el = {
+    fromPills: document.getElementById('fromPills'),
+    toPills: document.getElementById('toPills'),
+    swap: document.getElementById('btnSwap'),
+    modeText: document.getElementById('modeText'),
+    modeDict: document.getElementById('modeDict'),
+    input: document.getElementById('input'),
+    count: document.getElementById('count'),
+    clear: document.getElementById('btnClear'),
+    go: document.getElementById('btnGo'),
+    status: document.getElementById('status'),
+    result: document.getElementById('result'),
+    history: document.getElementById('history'),
+    histList: document.getElementById('histList'),
+    histClear: document.getElementById('btnHistClear')
+  };
+
+  // ---------- хранилище ----------
+
+  function read(key, fallback) {
+    try {
+      var raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch (e) { return fallback; }
+  }
+  function write(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* квота */ }
+  }
+
+  function cacheKey(text) {
+    return state.mode + '|' + state.from + '|' + state.to + '|' + text;
+  }
+  function cacheGet(text) {
+    var store = read(CACHE_KEY, {});
+    return store[cacheKey(text)] || null;
+  }
+  function cacheSet(text, payload) {
+    var store = read(CACHE_KEY, {});
+    store[cacheKey(text)] = { at: Date.now(), payload: payload };
+    var keys = Object.keys(store);
+    if (keys.length > CACHE_MAX) {
+      keys.sort(function (a, b) { return store[a].at - store[b].at; });
+      keys.slice(0, keys.length - CACHE_MAX).forEach(function (k) { delete store[k]; });
+    }
+    write(CACHE_KEY, store);
+  }
+
+  // ---------- языки и режимы ----------
+
+  function buildPills(box, side) {
+    box.innerHTML = '';
+    LANGS.forEach(function (lang) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pill';
+      b.textContent = lang.label;
+      b.dataset.code = lang.code;
+      b.addEventListener('click', function () { pickLang(side, lang.code); });
+      box.appendChild(b);
+    });
+  }
+
+  function pickLang(side, code) {
+    if (state[side] === code) return;
+    var other = side === 'from' ? 'to' : 'from';
+    if (state[other] === code) state[other] = state[side];
+    state[side] = code;
+    syncLangs();
+    savePrefs();
+  }
+
+  function syncLangs() {
+    [['from', el.fromPills], ['to', el.toPills]].forEach(function (pair) {
+      var side = pair[0], box = pair[1];
+      Array.prototype.forEach.call(box.querySelectorAll('.pill'), function (b) {
+        b.setAttribute('aria-pressed', String(b.dataset.code === state[side]));
+      });
+    });
+  }
+
+  function setMode(mode) {
+    state.mode = mode;
+    el.modeText.setAttribute('aria-pressed', String(mode === 'text'));
+    el.modeDict.setAttribute('aria-pressed', String(mode === 'dict'));
+    el.input.placeholder = PLACEHOLDER[mode];
+    updateCount();
+    savePrefs();
+  }
+
+  function savePrefs() { write(PREF_KEY, state); }
+
+  function loadPrefs() {
+    var saved = read(PREF_KEY, null);
+    if (!saved) return;
+    if (LANGS.some(function (l) { return l.code === saved.from; })) state.from = saved.from;
+    if (LANGS.some(function (l) { return l.code === saved.to; })) state.to = saved.to;
+    if (saved.mode === 'dict' || saved.mode === 'text') state.mode = saved.mode;
+    if (state.from === state.to) state.to = state.from === 'de' ? 'ru' : 'de';
+  }
+
+  // ---------- ввод ----------
+
+  function updateCount() {
+    var len = el.input.value.length;
+    var max = LIMIT[state.mode];
+    el.count.textContent = len + ' / ' + max;
+    el.count.classList.toggle('over', len > max);
+    el.go.disabled = busy || len === 0 || len > max;
+  }
+
+  function autoGrow() {
+    el.input.style.height = 'auto';
+    el.input.style.height = Math.min(el.input.scrollHeight, 340) + 'px';
+  }
+
+  // ---------- запрос ----------
+
+  function translate() {
+    var text = el.input.value.trim();
+    if (!text || busy) return;
+    if (text.length > LIMIT[state.mode]) return;
+
+    var cached = cacheGet(text);
+    if (cached) {
+      show(cached.payload);
+      addHistory(text);
+      setStatus('Из кэша');
+      return;
+    }
+
+    busy = true;
+    updateCount();
+    setStatus('Перевожу…');
+    el.result.innerHTML = '';
+
+    fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: text, from: state.from, to: state.to, mode: state.mode })
+    })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (!res.ok) throw new Error(data.error || ('Ошибка ' + res.status));
+          return data;
+        });
+      })
+      .then(function (data) {
+        cacheSet(text, data);
+        addHistory(text);
+        show(data);
+        setStatus('');
+      })
+      .catch(function (err) {
+        setStatus(err.message || 'Не удалось связаться с сервером.', true);
+      })
+      .then(function () {
+        busy = false;
+        updateCount();
+      });
+  }
+
+  function setStatus(msg, isError) {
+    el.status.textContent = msg || '';
+    el.status.classList.toggle('error', !!isError);
+  }
+
+  // ---------- вывод ----------
+
+  function show(data) {
+    el.result.innerHTML = '';
+    if (data.entry) renderEntry(data.entry);
+    else if (data.translation) renderText(data.translation);
+    else setStatus('Пустой ответ от сервера.', true);
+  }
+
+  function renderText(text) {
+    lastOutput = { text: text, lang: state.to };
+    var box = document.createElement('div');
+    box.className = 'out';
+    var p = document.createElement('p');
+    p.className = 'text';
+    p.textContent = text;
+    box.appendChild(p);
+    box.appendChild(toolbar(text, state.to));
+    el.result.appendChild(box);
+  }
+
+  function renderEntry(entry) {
+    var box = document.createElement('div');
+    box.className = 'entry';
+
+    var head = document.createElement('div');
+    head.className = 'head';
+
+    var art = String(entry.article || '').toLowerCase();
+    if (art === 'der' || art === 'die' || art === 'das') {
+      var a = document.createElement('span');
+      a.className = 'article ' + art;
+      a.textContent = art;
+      head.appendChild(a);
+    }
+
+    var w = document.createElement('span');
+    w.className = 'word';
+    w.textContent = entry.headword || el.input.value.trim();
+    head.appendChild(w);
+
+    if (entry.pos) {
+      var pos = document.createElement('span');
+      pos.className = 'pos';
+      pos.textContent = entry.pos;
+      head.appendChild(pos);
+    }
+    box.appendChild(head);
+
+    if (entry.plural) {
+      var pl = document.createElement('div');
+      pl.className = 'forms';
+      pl.textContent = 'мн. ч.: ';
+      var pls = document.createElement('span');
+      pls.className = 'article pl';
+      pls.textContent = 'die ';
+      pl.appendChild(pls);
+      pl.appendChild(document.createTextNode(entry.plural));
+      box.appendChild(pl);
+    }
+
+    var senses = Array.isArray(entry.senses) ? entry.senses : [];
+    var spoken = [];
+    senses.forEach(function (sense, i) {
+      var row = document.createElement('div');
+      row.className = 'sense';
+
+      if (senses.length > 1) {
+        var n = document.createElement('div');
+        n.className = 'num';
+        n.textContent = (i + 1) + '.';
+        row.appendChild(n);
+      }
+
+      var body = document.createElement('div');
+      body.className = 'body';
+
+      var tr = document.createElement('div');
+      tr.className = 'tr';
+      tr.textContent = sense.translation || '';
+      body.appendChild(tr);
+      if (sense.translation) spoken.push(sense.translation);
+
+      if (sense.note) {
+        var note = document.createElement('div');
+        note.className = 'note';
+        note.textContent = sense.note;
+        body.appendChild(note);
+      }
+
+      (Array.isArray(sense.examples) ? sense.examples : []).forEach(function (ex) {
+        if (!ex || (!ex.src && !ex.dst)) return;
+        var wrap = document.createElement('div');
+        wrap.className = 'ex';
+        if (ex.src) {
+          var s = document.createElement('div');
+          s.className = 'src';
+          s.textContent = ex.src;
+          wrap.appendChild(s);
+        }
+        if (ex.dst) {
+          var d = document.createElement('div');
+          d.className = 'dst';
+          d.textContent = ex.dst;
+          wrap.appendChild(d);
+        }
+        body.appendChild(wrap);
+      });
+
+      row.appendChild(body);
+      box.appendChild(row);
+    });
+
+    var grammar = Array.isArray(entry.grammar) ? entry.grammar.filter(function (g) {
+      return g && g.label && g.value;
+    }) : [];
+    if (grammar.length) {
+      var dl = document.createElement('dl');
+      dl.className = 'grid';
+      grammar.forEach(function (g) {
+        var dt = document.createElement('dt');
+        dt.textContent = g.label;
+        var dd = document.createElement('dd');
+        dd.textContent = g.value;
+        dl.appendChild(dt);
+        dl.appendChild(dd);
+      });
+      box.appendChild(dl);
+    }
+
+    if (Array.isArray(entry.synonyms) && entry.synonyms.length) {
+      var syn = document.createElement('div');
+      syn.className = 'syn';
+      syn.textContent = 'Синонимы: ' + entry.synonyms.join(', ');
+      box.appendChild(syn);
+    }
+
+    if (entry.note) {
+      var caution = document.createElement('div');
+      caution.className = 'caution';
+      caution.textContent = entry.note;
+      box.appendChild(caution);
+    }
+
+    var headwordText = entry.headword || el.input.value.trim();
+    lastOutput = { text: spoken.join('; '), lang: state.to };
+    box.appendChild(toolbar(spoken.join('; '), state.to, headwordText, state.from));
+    el.result.appendChild(box);
+  }
+
+  function toolbar(copyText, copyLang, speakSource, sourceLang) {
+    var bar = document.createElement('div');
+    bar.className = 'tools';
+
+    var copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'tool';
+    copy.textContent = 'Копировать';
+    copy.addEventListener('click', function () { copyToClipboard(copyText, copy); });
+    bar.appendChild(copy);
+
+    if (speakSource) {
+      bar.appendChild(speakButton('Озвучить оригинал', speakSource, sourceLang));
+    }
+    bar.appendChild(speakButton('Озвучить перевод', copyText, copyLang));
+    return bar;
+  }
+
+  function speakButton(label, text, langCode) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tool';
+    b.textContent = label;
+    b.addEventListener('click', function () { speak(text, langCode); });
+    return b;
+  }
+
+  function speak(text, langCode) {
+    if (!('speechSynthesis' in window) || !text) return;
+    var lang = LANGS.filter(function (l) { return l.code === langCode; })[0];
+    window.speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = lang ? lang.voice : 'de-DE';
+    u.rate = 0.95;
+    window.speechSynthesis.speak(u);
+  }
+
+  function copyToClipboard(text, button) {
+    if (!text) return;
+    var done = function () {
+      var old = button.textContent;
+      button.textContent = 'Скопировано';
+      setTimeout(function () { button.textContent = old; }, 1400);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text, done); });
+    } else {
+      fallbackCopy(text, done);
+    }
+  }
+
+  function fallbackCopy(text, done) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) { /* игнор */ }
+    document.body.removeChild(ta);
+  }
+
+  // ---------- история ----------
+
+  function addHistory(text) {
+    var items = read(HIST_KEY, []);
+    items = items.filter(function (i) {
+      return !(i.text === text && i.from === state.from && i.to === state.to && i.mode === state.mode);
+    });
+    items.unshift({ text: text, from: state.from, to: state.to, mode: state.mode });
+    write(HIST_KEY, items.slice(0, HIST_MAX));
+    renderHistory();
+  }
+
+  function renderHistory() {
+    var items = read(HIST_KEY, []);
+    el.histList.innerHTML = '';
+    el.history.classList.toggle('hidden', items.length === 0);
+    items.forEach(function (item) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'hist-item';
+      b.textContent = item.text.length > 60 ? item.text.slice(0, 60) + '…' : item.text;
+      var tag = document.createElement('span');
+      tag.textContent = item.from.toUpperCase() + '→' + item.to.toUpperCase() +
+        (item.mode === 'dict' ? ' · словарь' : '');
+      b.appendChild(tag);
+      b.addEventListener('click', function () {
+        state.from = item.from;
+        state.to = item.to;
+        syncLangs();
+        setMode(item.mode);
+        el.input.value = item.text;
+        autoGrow();
+        updateCount();
+        translate();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+      el.histList.appendChild(b);
+    });
+  }
+
+  // ---------- события ----------
+
+  buildPills(el.fromPills, 'from');
+  buildPills(el.toPills, 'to');
+  loadPrefs();
+  syncLangs();
+  setMode(state.mode);
+  renderHistory();
+
+  el.swap.addEventListener('click', function () {
+    var a = state.from;
+    state.from = state.to;
+    state.to = a;
+    syncLangs();
+    savePrefs();
+  });
+
+  el.modeText.addEventListener('click', function () { setMode('text'); });
+  el.modeDict.addEventListener('click', function () { setMode('dict'); });
+
+  el.input.addEventListener('input', function () { autoGrow(); updateCount(); });
+  el.input.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); translate(); }
+  });
+
+  el.go.addEventListener('click', translate);
+  el.clear.addEventListener('click', function () {
+    el.input.value = '';
+    el.result.innerHTML = '';
+    setStatus('');
+    autoGrow();
+    updateCount();
+    el.input.focus();
+  });
+
+  el.histClear.addEventListener('click', function () {
+    write(HIST_KEY, []);
+    renderHistory();
+  });
+
+  updateCount();
+})();
+</script>
+<script src="console.js"></script>
+</body>
+</html>
