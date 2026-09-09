@@ -362,11 +362,7 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
         cacheSet(text, data);
         addHistory(text);
         show(data);
-        var total = (Date.now() - sentAt) / 1000;
-        var model = data.ms ? (data.ms / 1000) : null;
-        setStatus(model
-          ? 'Всего ' + total.toFixed(1) + ' с, из них модель ' + model.toFixed(1) + ' с'
-          : 'Всего ' + total.toFixed(1) + ' с');
+        setStatus(timingLine(data, sentAt));
       })
       .catch(function (err) {
         setStatus(err.message || 'Не удалось связаться с сервером.', true);
@@ -375,6 +371,22 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
         busy = false;
         updateCount();
       });
+  }
+
+  function timingLine(data, sentAt) {
+    var parts = ['Всего ' + ((Date.now() - sentAt) / 1000).toFixed(1) + ' с'];
+    if (data.ms) parts.push('модель ' + (data.ms / 1000).toFixed(1) + ' с');
+
+    var u = data.usage || {};
+    if (typeof u.candidatesTokenCount === 'number') {
+      parts.push('ответ ' + u.candidatesTokenCount + ' ток.');
+    }
+    // Ключевая цифра: если размышление больше нуля при долгом ответе —
+    // виновато рассуждение модели, а не очередь бесплатного тарифа.
+    if (typeof u.thoughtsTokenCount === 'number') {
+      parts.push('размышления ' + u.thoughtsTokenCount + ' ток.');
+    }
+    return parts.join(' · ');
   }
 
   function setStatus(msg, isError) {
