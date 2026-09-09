@@ -353,16 +353,21 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
       body: JSON.stringify({ text: text, from: state.from, to: state.to, mode: state.mode })
     })
       .then(function (res) {
-        return res.json().catch(function () { return {}; }).then(function (data) {
-          if (!res.ok) throw new Error(data.error || ('Ошибка ' + res.status));
-          return data;
+        if (!res.ok) {
+          return res.json().catch(function () { return {}; }).then(function (data) {
+            throw new Error(data.error || ('Ошибка ' + res.status));
+          });
+        }
+        // Перевод приходит потоком text/plain, словарь — обычным JSON.
+        var ct = res.headers.get('content-type') || '';
+        if (ct.indexOf('text/plain') === 0) return readStream(res, text, sentAt);
+
+        return res.json().then(function (data) {
+          cacheSet(text, data);
+          addHistory(text);
+          show(data);
+          setStatus(timingLine(data, sentAt));
         });
-      })
-      .then(function (data) {
-        cacheSet(text, data);
-        addHistory(text);
-        show(data);
-        setStatus(timingLine(data, sentAt));
       })
       .catch(function (err) {
         setStatus(err.message || 'Не удалось связаться с сервером.', true);
@@ -371,6 +376,54 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
         busy = false;
         updateCount();
       });
+  }
+
+  function readStream(res, source, sentAt) {
+    var handle = openTextBox();
+    var acc = '';
+    var firstAt = 0;
+
+    function finish() {
+      handle.p.textContent = acc;
+      finishTextBox(handle, acc);
+      cacheSet(source, { mode: 'text', translation: acc });
+      addHistory(source);
+      setStatus(streamTiming(sentAt, firstAt));
+    }
+
+    // Старые движки без ReadableStream просто получат текст целиком.
+    if (!res.body || typeof res.body.getReader !== 'function') {
+      return res.text().then(function (t) {
+        acc = t;
+        firstAt = Date.now();
+        finish();
+      });
+    }
+
+    var reader = res.body.getReader();
+    var decoder = new TextDecoder();
+
+    function pump() {
+      return reader.read().then(function (chunk) {
+        if (chunk.done) {
+          acc += decoder.decode();
+          finish();
+          return;
+        }
+        if (!firstAt) firstAt = Date.now();
+        acc += decoder.decode(chunk.value, { stream: true });
+        handle.p.textContent = acc;
+        return pump();
+      });
+    }
+    return pump();
+  }
+
+  function streamTiming(sentAt, firstAt) {
+    var total = ((Date.now() - sentAt) / 1000).toFixed(1);
+    if (!firstAt) return 'Всего ' + total + ' с';
+    return 'Первые слова через ' + ((firstAt - sentAt) / 1000).toFixed(1) +
+      ' с · всего ' + total + ' с';
   }
 
   function timingLine(data, sentAt) {
@@ -403,16 +456,25 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
     else setStatus('Пустой ответ от сервера.', true);
   }
 
-  function renderText(text) {
-    lastOutput = { text: text, lang: state.to };
+  function openTextBox() {
     var box = document.createElement('div');
     box.className = 'out';
     var p = document.createElement('p');
     p.className = 'text';
-    p.textContent = text;
     box.appendChild(p);
-    box.appendChild(toolbar(text, state.to));
     el.result.appendChild(box);
+    return { box: box, p: p };
+  }
+
+  function finishTextBox(handle, text) {
+    lastOutput = { text: text, lang: state.to };
+    handle.box.appendChild(toolbar(text, state.to));
+  }
+
+  function renderText(text) {
+    var handle = openTextBox();
+    handle.p.textContent = text;
+    finishTextBox(handle, text);
   }
 
   function renderEntry(entry) {

@@ -1,30 +1,30 @@
 // ============================================================
 //  Übersetzer — API-функция на Gemini (Vercel Serverless, Node.js)
-//  Кладётся вместо прежней:  /api/translate.js
-//  Контракт запроса/ответа тот же, фронт менять не нужно.
+//  Кладётся как:  /api/translate.js
+//
+//  Режим "text" отдаётся потоком (text/plain, чанки по мере генерации).
+//  Режим "dict" остаётся обычным JSON — там ответ по схеме, стримить нечего.
 //
 //  Environment Variables на Vercel:
-//    GEMINI_API_KEY   — ключ из Google AI Studio (aistudio.google.com)
+//    GEMINI_API_KEY   — обязательно, ключ из Google AI Studio
+//    MODEL_TEXT       — опционально, модель для перевода
+//    MODEL_DICT       — опционально, модель для словаря
 //    ALLOWED_ORIGINS  — опционально, через запятую; свой домен разрешён сам
 // ============================================================
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 // Бесплатный тариф — только Flash и Flash-Lite.
-// Есть более свежие стабильные: gemini-3.6-flash, 3.7-flash, 3.8-flash.
-// Если модель недоступна на твоём проекте, API вернёт 404 — поменяй строку.
-const MODEL_TEXT = 'gemini-3.5-flash-lite';
-const MODEL_DICT = 'gemini-3.5-flash';
+// Меняются через переменные окружения, без правки кода.
+const MODEL_TEXT = process.env.MODEL_TEXT || 'gemini-3.5-flash-lite';
+const MODEL_DICT = process.env.MODEL_DICT || 'gemini-3.5-flash';
 
 const LANG_NAME = { de: 'German', ru: 'Russian', uk: 'Ukrainian' };
 
 const MAX_LEN = { text: 5000, dict: 120 };
-// У моделей с рассуждением служебные токены тоже расходуют этот бюджет,
-// поэтому запас сознательно большой — иначе ответ обрывается на MAX_TOKENS.
 const MAX_TOKENS = { text: 3000, dict: 3000 };
 
-// Ключевой параметр. У моделей Gemini 3.x рассуждение включено по умолчанию
-// (у Flash — medium/high), и простой перевод ждёт его полминуты.
+// У моделей Gemini 3.x рассуждение включено по умолчанию и съедает секунды.
 // Переводу думать не о чем, словарю хватает минимума.
 // Допустимые значения: MINIMAL, LOW, MEDIUM, HIGH.
 const THINKING = { text: 'MINIMAL', dict: 'LOW' };
@@ -33,8 +33,6 @@ const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 20;
 const hits = new Map();
 
-// Переводчику приходится работать с руганью, медициной и письмами из суда.
-// Режем только совсем крайние случаи, иначе фильтр блокирует нормальный текст.
 const SAFETY = [
   'HARM_CATEGORY_HARASSMENT',
   'HARM_CATEGORY_HATE_SPEECH',
@@ -45,26 +43,16 @@ const SAFETY = [
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
-  if (req.method !== 'POST') {
-    return fail(res, 405, 'Метод не поддерживается. Нужен POST.');
-  }
-  if (!process.env.GEMINI_API_KEY) {
-    return fail(res, 500, 'На сервере не задан GEMINI_API_KEY.');
-  }
-  if (!isAllowedOrigin(req)) {
-    return fail(res, 403, 'Запрос с чужого источника отклонён.');
-  }
-  if (!underRateLimit(clientIp(req))) {
-    return fail(res, 429, 'Слишком много запросов. Подожди минуту.');
-  }
+  if (req.method !== 'POST') return fail(res, 405, 'Метод не поддерживается. Нужен POST.');
+  if (!process.env.GEMINI_API_KEY) return fail(res, 500, 'На сервере не задан GEMINI_API_KEY.');
+  if (!isAllowedOrigin(req)) return fail(res, 403, 'Запрос с чужого источника отклонён.');
+  if (!underRateLimit(clientIp(req))) return fail(res, 429, 'Слишком много запросов. Подожди минуту.');
 
   let body = req.body;
   if (typeof body === 'string') {
     try { body = JSON.parse(body); } catch { return fail(res, 400, 'Тело запроса — не JSON.'); }
   }
-  if (!body || typeof body !== 'object') {
-    return fail(res, 400, 'Пустое тело запроса.');
-  }
+  if (!body || typeof body !== 'object') return fail(res, 400, 'Пустое тело запроса.');
 
   const mode = body.mode === 'dict' ? 'dict' : 'text';
   const from = String(body.from || '').toLowerCase();
@@ -99,12 +87,20 @@ module.exports = async function handler(req, res) {
     safetySettings: SAFETY
   };
 
+  // Стримим только перевод. Словарь ждёт целиком: его ответ разбирается как JSON.
+  const streaming = mode === 'text';
+  const endpoint = streaming
+    ? `${API_BASE}/${model}:streamGenerateContent?alt=sse`
+    : `${API_BASE}/${model}:generateContent`;
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 25_000);
+  // Таймер сторожит только ожидание первого байта. Как только поток пошёл,
+  // обрывать соединение нельзя — ответ уже частично у пользователя.
+  let timer = setTimeout(() => controller.abort(), 25_000);
   const startedAt = Date.now();
 
   try {
-    const upstream = await fetch(`${API_BASE}/${model}:generateContent`, {
+    const upstream = await fetch(endpoint, {
       method: 'POST',
       signal: controller.signal,
       headers: {
@@ -114,11 +110,9 @@ module.exports = async function handler(req, res) {
       body: JSON.stringify(payload)
     });
 
-    const data = await upstream.json().catch(() => null);
-
     if (!upstream.ok) {
-      const detail = data && data.error ? data.error.message : '';
-      console.error('Gemini API error', upstream.status, String(detail).slice(0, 400));
+      const raw = await upstream.text().catch(() => '');
+      console.error('Gemini API error', upstream.status, raw.slice(0, 400));
       if (upstream.status === 429) {
         return fail(res, 429, 'Дневной лимит бесплатного тарифа исчерпан. Попробуй завтра.');
       }
@@ -131,57 +125,120 @@ module.exports = async function handler(req, res) {
       return fail(res, 502, `Модель вернула ошибку (${upstream.status}).`);
     }
 
-    if (!data) return fail(res, 502, 'Модель вернула неразбираемый ответ.');
-
-    if (data.promptFeedback && data.promptFeedback.blockReason) {
-      return fail(res, 422, 'Текст заблокирован фильтром модели.');
+    if (!streaming) {
+      const data = await upstream.json().catch(() => null);
+      if (!data) return fail(res, 502, 'Модель вернула неразбираемый ответ.');
+      return sendDict(res, data, model, startedAt);
     }
 
-    const candidate = (data.candidates || [])[0];
-    if (!candidate) return fail(res, 502, 'Модель не вернула ни одного варианта.');
-
-    if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'PROHIBITED_CONTENT') {
-      return fail(res, 422, 'Ответ заблокирован фильтром модели.');
+    // ---- потоковый режим ----
+    if (!upstream.body || typeof upstream.body.getReader !== 'function') {
+      return fail(res, 502, 'Поток от модели недоступен.');
     }
 
-    // Модели с рассуждением кладут служебные части с флагом thought — их выкидываем.
-    const raw = ((candidate.content && candidate.content.parts) || [])
-      .filter(p => p && typeof p.text === 'string' && !p.thought)
-      .map(p => p.text)
-      .join('')
-      .trim();
-
-    if (!raw) {
-      if (candidate.finishReason === 'MAX_TOKENS') {
-        return fail(res, 502, 'Не хватило бюджета токенов. Увеличь MAX_TOKENS.');
-      }
-      return fail(res, 502, 'Модель вернула пустой ответ.');
-    }
-
-    if (mode === 'text') {
-      return res.status(200).json({
-        mode, model, translation: raw, ms: Date.now() - startedAt, usage: data.usageMetadata
-      });
-    }
-
-    const parsed = parseJson(raw);
-    if (!parsed) {
-      return res.status(200).json({ mode: 'text', model, translation: raw, degraded: true });
-    }
-    return res.status(200).json({
-      mode, model, entry: parsed, ms: Date.now() - startedAt, usage: data.usageMetadata
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Accel-Buffering': 'no',
+      'X-Model': model
     });
+
+    const reader = upstream.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let wrote = false;
+    let blocked = '';
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      if (timer) { clearTimeout(timer); timer = null; }
+      buffer += decoder.decode(value, { stream: true });
+
+      let nl;
+      while ((nl = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line.startsWith('data:')) continue;
+
+        const json = line.slice(5).trim();
+        if (!json || json === '[DONE]') continue;
+
+        let chunk;
+        try { chunk = JSON.parse(json); } catch { continue; }
+
+        if (chunk.promptFeedback && chunk.promptFeedback.blockReason) {
+          blocked = 'Текст заблокирован фильтром модели.';
+          continue;
+        }
+
+        const cand = (chunk.candidates || [])[0];
+        if (!cand) continue;
+        if (cand.finishReason === 'SAFETY' || cand.finishReason === 'PROHIBITED_CONTENT') {
+          blocked = 'Ответ заблокирован фильтром модели.';
+          continue;
+        }
+
+        const piece = ((cand.content && cand.content.parts) || [])
+          .filter(p => p && typeof p.text === 'string' && !p.thought)
+          .map(p => p.text)
+          .join('');
+
+        if (piece) { res.write(piece); wrote = true; }
+      }
+    }
+
+    if (!wrote) res.write(blocked || 'Модель вернула пустой ответ.');
+    return res.end();
 
   } catch (err) {
     if (err.name === 'AbortError') {
       return fail(res, 504, 'Модель не ответила за 25 секунд. Попробуй текст покороче.');
     }
     console.error('translate handler failed', err);
+    // Если заголовки уже ушли, JSON-ошибку слать поздно — просто закрываем поток.
+    if (res.headersSent) return res.end();
     return fail(res, 500, 'Внутренняя ошибка при обращении к модели.');
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
   }
 };
+
+// ---------- словарный ответ ----------
+
+function sendDict(res, data, model, startedAt) {
+  if (data.promptFeedback && data.promptFeedback.blockReason) {
+    return fail(res, 422, 'Текст заблокирован фильтром модели.');
+  }
+
+  const candidate = (data.candidates || [])[0];
+  if (!candidate) return fail(res, 502, 'Модель не вернула ни одного варианта.');
+  if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'PROHIBITED_CONTENT') {
+    return fail(res, 422, 'Ответ заблокирован фильтром модели.');
+  }
+
+  const raw = ((candidate.content && candidate.content.parts) || [])
+    .filter(p => p && typeof p.text === 'string' && !p.thought)
+    .map(p => p.text)
+    .join('')
+    .trim();
+
+  if (!raw) {
+    if (candidate.finishReason === 'MAX_TOKENS') {
+      return fail(res, 502, 'Не хватило бюджета токенов. Увеличь MAX_TOKENS.');
+    }
+    return fail(res, 502, 'Модель вернула пустой ответ.');
+  }
+
+  const parsed = parseJson(raw);
+  if (!parsed) {
+    return res.status(200).json({ mode: 'text', model, translation: raw, degraded: true });
+  }
+  return res.status(200).json({
+    mode: 'dict', model, entry: parsed, ms: Date.now() - startedAt, usage: data.usageMetadata
+  });
+}
 
 // ---------- схема словарной статьи ----------
 
