@@ -23,6 +23,12 @@ const MAX_LEN = { text: 5000, dict: 120 };
 // поэтому запас сознательно большой — иначе ответ обрывается на MAX_TOKENS.
 const MAX_TOKENS = { text: 3000, dict: 3000 };
 
+// Ключевой параметр. У моделей Gemini 3.x рассуждение включено по умолчанию
+// (у Flash — medium/high), и простой перевод ждёт его полминуты.
+// Переводу думать не о чем, словарю хватает минимума.
+// Допустимые значения: MINIMAL, LOW, MEDIUM, HIGH.
+const THINKING = { text: 'MINIMAL', dict: 'LOW' };
+
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 20;
 const hits = new Map();
@@ -76,7 +82,8 @@ module.exports = async function handler(req, res) {
 
   const generationConfig = {
     temperature: mode === 'dict' ? 0.2 : 0,
-    maxOutputTokens: MAX_TOKENS[mode]
+    maxOutputTokens: MAX_TOKENS[mode],
+    thinkingConfig: { thinkingLevel: THINKING[mode] }
   };
   if (mode === 'dict') {
     generationConfig.responseMimeType = 'application/json';
