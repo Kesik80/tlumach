@@ -101,6 +101,7 @@ module.exports = async function handler(req, res) {
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25_000);
+  const startedAt = Date.now();
 
   try {
     const upstream = await fetch(`${API_BASE}/${model}:generateContent`, {
@@ -159,7 +160,7 @@ module.exports = async function handler(req, res) {
 
     if (mode === 'text') {
       return res.status(200).json({
-        mode, model, translation: raw, usage: data.usageMetadata
+        mode, model, translation: raw, ms: Date.now() - startedAt, usage: data.usageMetadata
       });
     }
 
@@ -167,7 +168,9 @@ module.exports = async function handler(req, res) {
     if (!parsed) {
       return res.status(200).json({ mode: 'text', model, translation: raw, degraded: true });
     }
-    return res.status(200).json({ mode, model, entry: parsed, usage: data.usageMetadata });
+    return res.status(200).json({
+      mode, model, entry: parsed, ms: Date.now() - startedAt, usage: data.usageMetadata
+    });
 
   } catch (err) {
     if (err.name === 'AbortError') {

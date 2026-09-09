@@ -345,6 +345,7 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
     updateCount();
     setStatus('Перевожу…');
     el.result.innerHTML = '';
+    var sentAt = Date.now();
 
     fetch('/api/translate', {
       method: 'POST',
@@ -361,7 +362,11 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
         cacheSet(text, data);
         addHistory(text);
         show(data);
-        setStatus('');
+        var total = (Date.now() - sentAt) / 1000;
+        var model = data.ms ? (data.ms / 1000) : null;
+        setStatus(model
+          ? 'Всего ' + total.toFixed(1) + ' с, из них модель ' + model.toFixed(1) + ' с'
+          : 'Всего ' + total.toFixed(1) + ' с');
       })
       .catch(function (err) {
         setStatus(err.message || 'Не удалось связаться с сервером.', true);
