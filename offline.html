@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Тлумач</title>
+<style>
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#0a0a0f; color:#fff; font-family:system-ui,-apple-system,sans-serif; text-align:center; padding:24px }
+  img { width:88px; height:88px; border-radius:22px; margin-bottom:18px }
+  h1 { font-size:19px; margin:0 0 8px }
+  p { font-size:14px; opacity:.6; margin:0 0 22px; line-height:1.5 }
+  button { border:0; border-radius:14px; padding:13px 26px; font-size:14px; font-weight:700;
+           background:#fff; color:#111; cursor:pointer; font-family:inherit }
+</style>
+</head>
+<body>
+  <div>
+    <img src="/icons/icon-192x192.png" alt="">
+    <h1 id="t"></h1>
+    <p id="d"></p>
+    <button id="r" onclick="location.reload()"></button>
+  </div>
+<script>
+  var L = {
+    ru: ['Нет подключения', 'Страница откроется, как только появится интернет.', 'Попробовать снова'],
+    en: ['No connection', 'The page will open as soon as you are back online.', 'Try again'],
+    de: ['Keine Verbindung', 'Die Seite wird geladen, sobald du wieder online bist.', 'Erneut versuchen'],
+    uk: ['Немає підключення', 'Сторінка відкриється, щойно з’явиться інтернет.', 'Спробувати ще раз']
+  };
+  var cfgLang = "auto";
+  var code = 'en';
+  if (cfgLang !== 'auto' && L[cfgLang]) { code = cfgLang; }
+  else {
+    var list = navigator.languages || [navigator.language || 'en'];
+    for (var i = 0; i < list.length; i++) {
+      var c = String(list[i]).slice(0, 2).toLowerCase();
+      if (L[c]) { code = c; break; }
+    }
+  }
+  document.documentElement.lang = code;
+  document.getElementById('t').textContent = L[code][0];
+  document.getElementById('d').textContent = L[code][1];
+  document.getElementById('r').textContent = L[code][2];
+</script>
+</body>
+</html>

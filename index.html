@@ -749,9 +749,40 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
     renderHistory();
   });
 
+  // ---------- приём текста из «Поделиться» ----------
+
+  function intakeShare() {
+    var q;
+    try { q = new URLSearchParams(window.location.search); } catch (e) { return; }
+
+    // Разные приложения кладут текст в разные поля и порой дублируют его.
+    var seen = [];
+    ['text', 'url', 'title'].forEach(function (key) {
+      var v = (q.get(key) || '').trim();
+      if (v && seen.indexOf(v) === -1) seen.push(v);
+    });
+    if (!seen.length) return;
+
+    var shared = seen.join('\n');
+    if (state.mode === 'dict' && shared.length > LIMIT.dict) setMode('text');
+    shared = shared.slice(0, LIMIT[state.mode]);
+
+    el.input.value = shared;
+    autoGrow();
+    updateCount();
+
+    // Чистим адрес, иначе перезагрузка страницы переведёт то же самое заново.
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    translate();
+  }
+
   updateCount();
+  intakeShare();
 })();
 </script>
+<script src="/pwa.js"></script>
 <script src="console.js"></script>
 </body>
 </html>
