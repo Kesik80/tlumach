@@ -142,6 +142,57 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
 .syn{margin-top:14px;font-size:14px;color:var(--soft)}
 .caution{margin-top:14px;font-size:14px;color:var(--warn);border-left:2px solid var(--warn);padding-left:11px}
 
+.iconbtn{
+  background:transparent;color:var(--soft);border:1px solid var(--rule);
+  border-radius:9px;font:inherit;font-size:14px;padding:10px 12px;cursor:pointer;
+}
+.iconbtn[aria-pressed="true"]{background:var(--die);border-color:var(--die);color:#fff}
+.w{cursor:pointer;border-bottom:1px dotted transparent}
+.w:active{border-bottom-color:var(--soft);background:var(--field)}
+
+details.panel{margin-top:26px;border-top:1px solid var(--rule);padding-top:12px}
+details.panel>summary{
+  list-style:none;cursor:pointer;color:var(--soft);font-size:13px;font-weight:600;
+}
+details.panel>summary::-webkit-details-marker{display:none}
+details.panel>summary::after{content:" ▾"}
+details.panel[open]>summary::after{content:" ▴"}
+.phrase-group{margin-top:14px}
+.phrase-group h3{font-size:12px;font-weight:600;color:var(--soft);margin:0 0 6px}
+.phrase{
+  display:block;width:100%;text-align:left;background:transparent;border:0;
+  border-top:1px solid var(--rule);color:var(--ink);font:inherit;padding:9px 0;cursor:pointer;
+}
+.phrase b{display:block;font-family:var(--serif);font-size:17px;font-weight:400}
+.phrase i{display:block;color:var(--soft);font-size:13px;font-style:normal;margin-top:1px}
+.phrase-row{display:flex;align-items:flex-start;gap:6px;border-top:1px solid var(--rule)}
+.phrase-row .phrase{border-top:0;flex:1;min-width:0}
+.rowbtn{
+  background:transparent;border:0;color:var(--soft);font:inherit;font-size:15px;
+  padding:9px 6px;cursor:pointer;flex:none;
+}
+.rowbtn.danger{color:var(--die)}
+.editor{border-top:1px solid var(--rule);margin-top:12px;padding-top:12px}
+.editor.hidden{display:none}
+.field{margin-bottom:10px}
+.field label{display:block;color:var(--soft);font-size:12px;font-weight:600;margin-bottom:3px}
+.field .line{display:flex;gap:6px}
+.field input{
+  flex:1;min-width:0;background:var(--field);color:var(--ink);
+  border:1px solid var(--rule);border-radius:9px;padding:9px 11px;
+  font-family:var(--serif);font-size:16px;
+}
+.field input:focus{outline:2px solid var(--der);outline-offset:2px}
+.fill{
+  background:transparent;border:1px solid var(--rule);color:var(--soft);
+  border-radius:9px;font:inherit;font-size:13px;padding:0 10px;cursor:pointer;flex:none;
+}
+.editor-actions{display:flex;gap:8px;align-items:center;margin-top:12px}
+.editor-note{color:var(--soft);font-size:12px;margin:10px 0 0}
+.gloss-help{color:var(--soft);font-size:13px;margin:12px 0 8px}
+#glossText{min-height:96px;font-family:var(--sans);font-size:15px}
+.gloss-actions{display:flex;gap:8px;align-items:center;margin-top:8px}
+.gloss-count{color:var(--soft);font-size:12px}
 #history{margin-top:30px}
 #history h2{font-size:13px;font-weight:600;color:var(--soft);margin:0 0 8px}
 .hist-item{
@@ -176,6 +227,8 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
 <div class="meta">
   <span class="count" id="count">0 / 5000</span>
   <span class="actions">
+    <button class="iconbtn" id="btnMic" type="button" title="Надиктовать" aria-pressed="false">🎤</button>
+    <button class="iconbtn" id="btnPaste" type="button" title="Вставить из буфера и перевести">📋</button>
     <button class="ghost" id="btnClear" type="button">Очистить</button>
     <button class="go" id="btnGo" type="button">Перевести</button>
   </span>
@@ -190,6 +243,58 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
   <button class="hist-clear" id="btnHistClear" type="button">Очистить историю</button>
 </div>
 
+<details class="panel" id="phrasebook">
+  <summary>Разговорник — работает без интернета</summary>
+
+  <div class="gloss-actions">
+    <button class="ghost" id="btnPhraseNew" type="button">Добавить фразу</button>
+    <button class="ghost" id="btnPhraseEdit" type="button" aria-pressed="false">Править</button>
+  </div>
+
+  <div class="editor hidden" id="phraseEditor">
+    <div class="field">
+      <label for="fldDe">Немецкий</label>
+      <div class="line">
+        <input id="fldDe" type="text" autocapitalize="sentences" spellcheck="false">
+        <button class="fill" type="button" data-lang="de" title="Заполнить остальные по этому полю">Дополнить</button>
+      </div>
+    </div>
+    <div class="field">
+      <label for="fldRu">Русский</label>
+      <div class="line">
+        <input id="fldRu" type="text" autocapitalize="sentences" spellcheck="false">
+        <button class="fill" type="button" data-lang="ru" title="Заполнить остальные по этому полю">Дополнить</button>
+      </div>
+    </div>
+    <div class="field">
+      <label for="fldUk">Украинский</label>
+      <div class="line">
+        <input id="fldUk" type="text" autocapitalize="sentences" spellcheck="false">
+        <button class="fill" type="button" data-lang="uk" title="Заполнить остальные по этому полю">Дополнить</button>
+      </div>
+    </div>
+    <div class="editor-actions">
+      <button class="go" id="btnPhraseSave" type="button">Сохранить</button>
+      <button class="ghost" id="btnPhraseCancel" type="button">Отмена</button>
+      <span class="gloss-count" id="phraseStatus"></span>
+    </div>
+    <p class="editor-note">«Дополнить» переведёт заполненное поле на два других языка одним запросом. Места для подстановки пиши в фигурных скобках: {время}.</p>
+  </div>
+
+  <div id="phraseList"></div>
+</details>
+
+<details class="panel" id="glossary">
+  <summary>Глоссарий — свои варианты перевода</summary>
+  <p class="gloss-help">По строке на слово, в формате <b>Maschine = машина</b>. Эти соответствия подставляются в каждый запрос, чтобы перевод был единообразным. Годится для рабочих терминов, имён коллег и названий улиц.</p>
+  <textarea id="glossText" placeholder="Maschine = машина&#10;Schicht = смена&#10;Abholung = забрать"></textarea>
+  <div class="gloss-actions">
+    <button class="ghost" id="btnGlossSave" type="button">Сохранить</button>
+    <span class="gloss-count" id="glossCount"></span>
+  </div>
+</details>
+
+<script src="phrases.js"></script>
 <script>
 (function () {
   'use strict';
@@ -204,6 +309,8 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
   var CACHE_KEY = 'ueb_cache';
   var HIST_KEY = 'ueb_history';
   var PREF_KEY = 'ueb_prefs';
+  var GLOSS_KEY = 'ueb_glossary';
+  var MINE_KEY = 'ueb_myphrases';
   var CACHE_MAX = 150;
   var HIST_MAX = 25;
 
@@ -225,7 +332,23 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
     result: document.getElementById('result'),
     history: document.getElementById('history'),
     histList: document.getElementById('histList'),
-    histClear: document.getElementById('btnHistClear')
+    histClear: document.getElementById('btnHistClear'),
+    mic: document.getElementById('btnMic'),
+    paste: document.getElementById('btnPaste'),
+    phraseList: document.getElementById('phraseList'),
+    glossText: document.getElementById('glossText'),
+    glossSave: document.getElementById('btnGlossSave'),
+    glossCount: document.getElementById('glossCount'),
+    phrasebook: document.getElementById('phrasebook'),
+    phraseNew: document.getElementById('btnPhraseNew'),
+    phraseEditToggle: document.getElementById('btnPhraseEdit'),
+    editor: document.getElementById('phraseEditor'),
+    fldDe: document.getElementById('fldDe'),
+    fldRu: document.getElementById('fldRu'),
+    fldUk: document.getElementById('fldUk'),
+    phraseSave: document.getElementById('btnPhraseSave'),
+    phraseCancel: document.getElementById('btnPhraseCancel'),
+    phraseStatus: document.getElementById('phraseStatus')
   };
 
   // ---------- хранилище ----------
@@ -241,7 +364,18 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
   }
 
   function cacheKey(text) {
-    return state.mode + '|' + state.from + '|' + state.to + '|' + text;
+    return state.mode + '|' + state.from + '|' + state.to + '|' + glossHash() + '|' + text;
+  }
+
+  // Короткий хэш глоссария: при его правке старые переводы должны
+  // перестать доставаться из кэша, иначе новые термины не подхватятся.
+  function glossHash() {
+    var raw = read(GLOSS_KEY, '');
+    var h = 0;
+    for (var i = 0; i < raw.length; i++) {
+      h = ((h << 5) - h + raw.charCodeAt(i)) | 0;
+    }
+    return h.toString(36);
   }
   function cacheGet(text) {
     var store = read(CACHE_KEY, {});
@@ -280,6 +414,7 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
     state[side] = code;
     syncLangs();
     savePrefs();
+    renderPhrasebook();
   }
 
   function syncLangs() {
@@ -350,7 +485,10 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
     fetch('/api/translate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text: text, from: state.from, to: state.to, mode: state.mode })
+      body: JSON.stringify({
+        text: text, from: state.from, to: state.to, mode: state.mode,
+        glossary: glossaryPairs()
+      })
     })
       .then(function (res) {
         if (!res.ok) {
@@ -468,7 +606,44 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
 
   function finishTextBox(handle, text) {
     lastOutput = { text: text, lang: state.to };
+    decorateWords(handle.p, text);
     handle.box.appendChild(toolbar(text, state.to));
+  }
+
+  // Разбираем готовый текст на слова, чтобы по каждому можно было ткнуть
+  // и получить словарную статью. Во время стриминга этого не делаем —
+  // там текст ещё дописывается.
+  function decorateWords(p, text) {
+    p.textContent = '';
+    var parts = text.split(/([A-Za-zÀ-ÿА-Яа-яЁёЇїІіЄєҐґ]+(?:[-'][A-Za-zÀ-ÿА-Яа-яЁёЇїІіЄєҐґ]+)*)/);
+    parts.forEach(function (chunk, i) {
+      if (!chunk) return;
+      if (i % 2 === 1) {
+        var span = document.createElement('span');
+        span.className = 'w';
+        span.textContent = chunk;
+        span.addEventListener('click', function () { lookupWord(chunk); });
+        p.appendChild(span);
+      } else {
+        p.appendChild(document.createTextNode(chunk));
+      }
+    });
+  }
+
+  // Слово взято из перевода, значит его язык — язык результата,
+  // и разбирать его надо в обратную сторону.
+  function lookupWord(word) {
+    var a = state.from;
+    state.from = state.to;
+    state.to = a;
+    syncLangs();
+    savePrefs();
+    setMode('dict');
+    el.input.value = word;
+    autoGrow();
+    updateCount();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    translate();
   }
 
   function renderText(text) {
@@ -621,6 +796,15 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
       bar.appendChild(speakButton('Озвучить оригинал', speakSource, sourceLang));
     }
     bar.appendChild(speakButton('Озвучить перевод', copyText, copyLang));
+
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'tool';
+    add.textContent = 'В разговорник';
+    var src = speakSource || el.input.value.trim();
+    add.addEventListener('click', function () { phraseFromResult(src, copyText); });
+    bar.appendChild(add);
+
     return bar;
   }
 
@@ -709,6 +893,320 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
     });
   }
 
+  // ---------- глоссарий ----------
+
+  function glossaryPairs() {
+    var raw = read(GLOSS_KEY, '');
+    if (!raw) return [];
+    return raw.split('\n')
+      .map(function (line) {
+        var i = line.indexOf('=');
+        if (i < 1) return null;
+        var src = line.slice(0, i).trim();
+        var dst = line.slice(i + 1).trim();
+        if (!src || !dst) return null;
+        return { src: src.slice(0, 60), dst: dst.slice(0, 60) };
+      })
+      .filter(Boolean)
+      .slice(0, 40);
+  }
+
+  function renderGlossCount() {
+    var n = glossaryPairs().length;
+    el.glossCount.textContent = n ? n + ' из 40' : 'пусто';
+  }
+
+  function saveGlossary() {
+    write(GLOSS_KEY, el.glossText.value);
+    renderGlossCount();
+    var old = el.glossSave.textContent;
+    el.glossSave.textContent = 'Сохранено';
+    setTimeout(function () { el.glossSave.textContent = old; }, 1400);
+  }
+
+  // ---------- разговорник ----------
+
+  // Фразы лежат в отдельном файле phrases.js — его можно править,
+  // не трогая приложение. Если файл не загрузился, панель просто скрыта.
+  var PHRASES = Array.isArray(window.TLUMACH_PHRASES) ? window.TLUMACH_PHRASES : [];
+
+  // Свои фразы живут в localStorage: файл phrases.js лежит в репозитории,
+  // и записать в него из браузера нельзя.
+  var editing = null;   // id правящейся фразы, либо null для новой
+  var editMode = false; // показаны ли кнопки правки у своих фраз
+
+  function myPhrases() {
+    var list = read(MINE_KEY, []);
+    return Array.isArray(list) ? list : [];
+  }
+
+  function saveMine(list) { write(MINE_KEY, list); }
+
+  // Что показать крупно, что мелко: крупно — язык оригинала,
+  // мелко — язык, на который переводим. Если поля нет, берём что есть.
+  function phrasePick(item) {
+    var order = [state.from, 'de', 'ru', 'uk'];
+    for (var i = 0; i < order.length; i++) {
+      if (item[order[i]]) return { text: item[order[i]], lang: order[i] };
+    }
+    return { text: '', lang: 'de' };
+  }
+
+  function phraseSecondary(item) {
+    if (item[state.to]) return item[state.to];
+    var pick = phrasePick(item);
+    var rest = ['de', 'ru', 'uk'].filter(function (l) { return l !== pick.lang && item[l]; });
+    return rest.length ? item[rest[0]] : '';
+  }
+
+  function phraseButton(item) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'phrase';
+    var main = document.createElement('b');
+    main.textContent = phrasePick(item).text;
+    var sub = document.createElement('i');
+    sub.textContent = phraseSecondary(item);
+    b.appendChild(main);
+    b.appendChild(sub);
+    b.addEventListener('click', function () { usePhrase(item); });
+    return b;
+  }
+
+  function renderPhrasebook() {
+    if (!PHRASES.length && !myPhrases().length) {
+      el.phrasebook.classList.add('hidden');
+      return;
+    }
+    el.phrasebook.classList.remove('hidden');
+    el.phraseList.innerHTML = '';
+
+    var mine = myPhrases();
+    if (mine.length) {
+      var wrap = document.createElement('div');
+      wrap.className = 'phrase-group';
+      var h = document.createElement('h3');
+      h.textContent = 'Мои фразы';
+      wrap.appendChild(h);
+
+      mine.forEach(function (item) {
+        if (!editMode) { wrap.appendChild(phraseButton(item)); return; }
+
+        var row = document.createElement('div');
+        row.className = 'phrase-row';
+        row.appendChild(phraseButton(item));
+
+        var edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'rowbtn';
+        edit.textContent = '✎';
+        edit.title = 'Изменить';
+        edit.addEventListener('click', function () { openEditor(item); });
+        row.appendChild(edit);
+
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'rowbtn danger';
+        del.textContent = '✕';
+        del.title = 'Удалить';
+        del.addEventListener('click', function () { removePhrase(item.id); });
+        row.appendChild(del);
+
+        wrap.appendChild(row);
+      });
+      el.phraseList.appendChild(wrap);
+    }
+
+    PHRASES.forEach(function (group) {
+      var wrap = document.createElement('div');
+      wrap.className = 'phrase-group';
+      var h = document.createElement('h3');
+      h.textContent = group.title;
+      wrap.appendChild(h);
+      group.items.forEach(function (item) { wrap.appendChild(phraseButton(item)); });
+      el.phraseList.appendChild(wrap);
+    });
+  }
+
+  // Фраза кладётся в поле ввода, а не переводится: обычно её надо
+  // поправить под себя и отправить собеседнику.
+  function usePhrase(item) {
+    var pick = phrasePick(item);
+    if (!pick.text) return;
+    el.input.value = pick.text;
+    autoGrow();
+    updateCount();
+    speak(pick.text, pick.lang);
+    copyToClipboard(pick.text, el.paste);
+    setStatus('Фраза скопирована и озвучена');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // ---------- редактор разговорника ----------
+
+  function openEditor(item) {
+    editing = item ? item.id : null;
+    el.fldDe.value = item ? (item.de || '') : '';
+    el.fldRu.value = item ? (item.ru || '') : '';
+    el.fldUk.value = item ? (item.uk || '') : '';
+    el.phraseStatus.textContent = '';
+    el.editor.classList.remove('hidden');
+    el.phrasebook.open = true;
+    el.editor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function closeEditor() {
+    editing = null;
+    el.editor.classList.add('hidden');
+    el.phraseStatus.textContent = '';
+  }
+
+  function savePhrase() {
+    var item = {
+      de: el.fldDe.value.trim(),
+      ru: el.fldRu.value.trim(),
+      uk: el.fldUk.value.trim()
+    };
+    if (!item.de && !item.ru && !item.uk) {
+      el.phraseStatus.textContent = 'Пустая фраза';
+      return;
+    }
+
+    var list = myPhrases();
+    if (editing) {
+      var found = false;
+      list = list.map(function (p) {
+        if (p.id !== editing) return p;
+        found = true;
+        item.id = p.id;
+        return item;
+      });
+      if (!found) { item.id = editing; list.push(item); }
+    } else {
+      item.id = 'p' + Date.now().toString(36);
+      list.push(item);
+    }
+    saveMine(list);
+    closeEditor();
+    renderPhrasebook();
+  }
+
+  function removePhrase(id) {
+    saveMine(myPhrases().filter(function (p) { return p.id !== id; }));
+    if (editing === id) closeEditor();
+    renderPhrasebook();
+  }
+
+  // Заполняет два оставшихся языка одним запросом к модели.
+  function fillPhrase(lang) {
+    var field = { de: el.fldDe, ru: el.fldRu, uk: el.fldUk }[lang];
+    var source = field.value.trim();
+    if (!source) { el.phraseStatus.textContent = 'Это поле пустое'; return; }
+
+    el.phraseStatus.textContent = 'Перевожу…';
+    fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        text: source, from: lang, to: lang === 'de' ? 'ru' : 'de',
+        mode: 'phrase', glossary: glossaryPairs()
+      })
+    })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (!res.ok) throw new Error(data.error || ('Ошибка ' + res.status));
+          return data;
+        });
+      })
+      .then(function (data) {
+        var ph = data.phrase;
+        if (!ph) throw new Error('Модель вернула пустой ответ.');
+        // Исходное поле не трогаем: пользователь написал его сам.
+        if (lang !== 'de' && ph.de) el.fldDe.value = ph.de;
+        if (lang !== 'ru' && ph.ru) el.fldRu.value = ph.ru;
+        if (lang !== 'uk' && ph.uk) el.fldUk.value = ph.uk;
+        el.phraseStatus.textContent = 'Готово';
+      })
+      .catch(function (err) {
+        el.phraseStatus.textContent = err.message || 'Не получилось';
+      });
+  }
+
+  // Кнопка из результата перевода: исходник и перевод уже есть,
+  // третий язык дозаполняется в редакторе.
+  function phraseFromResult(sourceText, resultText) {
+    var draft = { id: null, de: '', ru: '', uk: '' };
+    draft[state.from] = sourceText;
+    draft[state.to] = resultText;
+    openEditor(draft);
+    editing = null;
+  }
+
+  // ---------- буфер обмена ----------
+
+  function pasteAndTranslate() {
+    if (!navigator.clipboard || !navigator.clipboard.readText) {
+      setStatus('Браузер не даёт читать буфер обмена.', true);
+      return;
+    }
+    navigator.clipboard.readText().then(function (t) {
+      var v = (t || '').trim();
+      if (!v) { setStatus('Буфер обмена пуст.', true); return; }
+      if (state.mode === 'dict' && v.length > LIMIT.dict) setMode('text');
+      el.input.value = v.slice(0, LIMIT[state.mode]);
+      autoGrow();
+      updateCount();
+      translate();
+    }, function () {
+      setStatus('Доступ к буферу обмена не разрешён.', true);
+    });
+  }
+
+  // ---------- голосовой ввод ----------
+
+  var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var recog = null;
+
+  function toggleMic() {
+    if (recog) { recog.stop(); return; }
+
+    var lang = LANGS.filter(function (l) { return l.code === state.from; })[0];
+    recog = new Recognition();
+    recog.lang = lang ? lang.voice : 'de-DE';
+    recog.interimResults = true;
+    recog.continuous = false;
+
+    var finalText = '';
+    el.mic.setAttribute('aria-pressed', 'true');
+    setStatus('Слушаю…');
+
+    recog.onresult = function (e) {
+      var interim = '';
+      for (var i = e.resultIndex; i < e.results.length; i++) {
+        var chunk = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += chunk; else interim += chunk;
+      }
+      el.input.value = (finalText + interim).slice(0, LIMIT[state.mode]);
+      autoGrow();
+      updateCount();
+    };
+
+    recog.onerror = function (e) {
+      setStatus(e.error === 'not-allowed'
+        ? 'Микрофон не разрешён.'
+        : 'Не удалось распознать речь.', true);
+    };
+
+    recog.onend = function () {
+      recog = null;
+      el.mic.setAttribute('aria-pressed', 'false');
+      if (el.input.value.trim()) { setStatus(''); translate(); }
+      else setStatus('');
+    };
+
+    try { recog.start(); } catch (e) { recog = null; el.mic.setAttribute('aria-pressed', 'false'); }
+  }
+
   // ---------- события ----------
 
   buildPills(el.fromPills, 'from');
@@ -724,6 +1222,7 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
     state.to = a;
     syncLangs();
     savePrefs();
+    renderPhrasebook();
   });
 
   el.modeText.addEventListener('click', function () { setMode('text'); });
@@ -748,6 +1247,35 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
     write(HIST_KEY, []);
     renderHistory();
   });
+
+  el.paste.addEventListener('click', pasteAndTranslate);
+
+  el.phraseNew.addEventListener('click', function () { openEditor(null); });
+  el.phraseSave.addEventListener('click', savePhrase);
+  el.phraseCancel.addEventListener('click', closeEditor);
+
+  el.phraseEditToggle.addEventListener('click', function () {
+    editMode = !editMode;
+    el.phraseEditToggle.setAttribute('aria-pressed', String(editMode));
+    el.phraseEditToggle.textContent = editMode ? 'Готово' : 'Править';
+    renderPhrasebook();
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('.fill'), function (b) {
+    b.addEventListener('click', function () { fillPhrase(b.dataset.lang); });
+  });
+
+  el.glossSave.addEventListener('click', saveGlossary);
+
+  if (Recognition) {
+    el.mic.addEventListener('click', toggleMic);
+  } else {
+    el.mic.style.display = 'none';
+  }
+
+  el.glossText.value = read(GLOSS_KEY, '');
+  renderGlossCount();
+  renderPhrasebook();
 
   // ---------- приём текста из «Поделиться» ----------
 
