@@ -327,7 +327,9 @@ const DICT_SCHEMA = {
     synonyms: { type: 'ARRAY', items: { type: 'STRING' } },
     note: { type: 'STRING' }
   },
-  required: ['headword', 'senses']
+  // grammar в required намеренно: просьбы заполнить его в тексте промпта
+  // модель игнорировала, схема же обязывает structurally.
+  required: ['headword', 'pos', 'senses', 'grammar']
 };
 
 const MEET_SCHEMA = {
