@@ -466,6 +466,7 @@ details.panel[open]>summary::after{content:" ▴"}
     syncLangs();
     savePrefs();
     renderPhrasebook();
+    clearResult();
   }
 
   function syncLangs() {
@@ -478,6 +479,9 @@ details.panel[open]>summary::after{content:" ▴"}
   }
 
   function setMode(mode) {
+    // Результат от прежнего режима на экране оставлять нельзя: выглядит так,
+    // будто это ответ нового режима.
+    if (state.mode !== mode) clearResult();
     state.mode = mode;
     el.modeText.setAttribute('aria-pressed', String(mode === 'text'));
     el.modeDict.setAttribute('aria-pressed', String(mode === 'dict'));
@@ -640,6 +644,13 @@ details.panel[open]>summary::after{content:" ▴"}
       parts.push('размышления ' + u.thoughtsTokenCount + ' ток.');
     }
     return parts.join(' · ');
+  }
+
+  // Старый ответ перестаёт соответствовать настройкам — убираем и его, и подпись.
+  function clearResult() {
+    if (!el.result.firstChild && !el.status.textContent) return;
+    el.result.innerHTML = '';
+    setStatus('');
   }
 
   function setStatus(msg, isError) {
@@ -1733,6 +1744,7 @@ details.panel[open]>summary::after{content:" ▴"}
     syncLangs();
     savePrefs();
     renderPhrasebook();
+    clearResult();
   });
 
   el.modeText.addEventListener('click', function () { setMode('text'); });
