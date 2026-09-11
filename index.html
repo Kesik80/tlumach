@@ -241,7 +241,7 @@ details.panel[open]>summary::after{content:" ▴"}
 <body>
 
 <h1>Übersetzer</h1>
-<p class="tagline">Немецкий, русский, украинский — перевод и словарь <span style="opacity:.6">· сборка 11.09 12:10</span></p>
+<p class="tagline">Немецкий, русский, украинский — перевод и словарь <span style="opacity:.6">· сборка 11.09 12:20</span></p>
 
 <div class="bar">
   <div class="pills" id="fromPills" role="group" aria-label="Язык оригинала"></div>
@@ -352,7 +352,7 @@ details.panel[open]>summary::after{content:" ▴"}
     photo: 'Читаю снимок…'
   };
   var PLACEHOLDER = { text: 'Текст для перевода', dict: 'Слово или короткая фраза' };
-  var CACHE_KEY = 'ueb_cache';
+  var CACHE_KEY = 'ueb_cache_v2';   // v1 содержал записи с перепутанными ключами
   var HIST_KEY = 'ueb_history';
   var PREF_KEY = 'ueb_prefs';
   var GLOSS_KEY = 'ueb_glossary';
@@ -569,7 +569,7 @@ details.panel[open]>summary::after{content:" ▴"}
         }
         // Перевод приходит потоком text/plain, словарь — обычным JSON.
         var ct = res.headers.get('content-type') || '';
-        if (ct.indexOf('text/plain') === 0) return readStream(res, text, sentAt);
+        if (ct.indexOf('text/plain') === 0) return readStream(res, text, sentAt, mode);
 
         return res.json().then(function (data) {
           cacheSet(text, data, mode);
@@ -587,7 +587,7 @@ details.panel[open]>summary::after{content:" ▴"}
       });
   }
 
-  function readStream(res, source, sentAt) {
+  function readStream(res, source, sentAt, mode) {
     var handle = openTextBox();
     var acc = '';
     var firstAt = 0;
@@ -596,7 +596,9 @@ details.panel[open]>summary::after{content:" ▴"}
     function finish() {
       handle.p.textContent = acc;
       finishTextBox(handle, acc);
-      cacheSet(source, { mode: 'text', translation: acc });
+      // Режим обязателен: без него ключ берётся из текущей вкладки,
+      // и текстовый перевод оседал под словарным ключом.
+      cacheSet(source, { mode: 'text', translation: acc }, mode || 'text');
       addHistory(source);
       setStatus(streamTiming(sentAt, firstAt, serverMode));
     }
