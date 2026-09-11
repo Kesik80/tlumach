@@ -186,7 +186,8 @@ module.exports = async function handler(req, res) {
       'Content-Type': 'text/plain; charset=utf-8',
       'Cache-Control': 'no-store',
       'X-Accel-Buffering': 'no',
-      'X-Model': model
+      'X-Model': model,
+      'X-Mode': mode
     });
 
     const reader = upstream.body.getReader();

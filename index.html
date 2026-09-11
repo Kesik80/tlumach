@@ -241,7 +241,7 @@ details.panel[open]>summary::after{content:" ▴"}
 <body>
 
 <h1>Übersetzer</h1>
-<p class="tagline">Немецкий, русский, украинский — перевод и словарь</p>
+<p class="tagline">Немецкий, русский, украинский — перевод и словарь <span style="opacity:.6">· сборка 11.09 12:00</span></p>
 
 <div class="bar">
   <div class="pills" id="fromPills" role="group" aria-label="Язык оригинала"></div>
@@ -586,13 +586,14 @@ details.panel[open]>summary::after{content:" ▴"}
     var handle = openTextBox();
     var acc = '';
     var firstAt = 0;
+    var serverMode = res.headers.get('X-Mode') || '';
 
     function finish() {
       handle.p.textContent = acc;
       finishTextBox(handle, acc);
       cacheSet(source, { mode: 'text', translation: acc });
       addHistory(source);
-      setStatus(streamTiming(sentAt, firstAt));
+      setStatus(streamTiming(sentAt, firstAt, serverMode));
     }
 
     // Старые движки без ReadableStream просто получат текст целиком.
@@ -623,11 +624,13 @@ details.panel[open]>summary::after{content:" ▴"}
     return pump();
   }
 
-  function streamTiming(sentAt, firstAt) {
+  function streamTiming(sentAt, firstAt, serverMode) {
     var total = ((Date.now() - sentAt) / 1000).toFixed(1);
-    if (!firstAt) return 'Всего ' + total + ' с';
-    return 'Первые слова через ' + ((firstAt - sentAt) / 1000).toFixed(1) +
-      ' с · всего ' + total + ' с';
+    var line = firstAt
+      ? 'Первые слова через ' + ((firstAt - sentAt) / 1000).toFixed(1) + ' с · всего ' + total + ' с'
+      : 'Всего ' + total + ' с';
+    // Маячок: какой режим сервер на самом деле выполнил.
+    return serverMode ? line + ' · сервер: ' + serverMode : line;
   }
 
   function timingLine(data, sentAt) {
