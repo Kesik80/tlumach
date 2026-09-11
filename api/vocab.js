@@ -1,29 +1,36 @@
 // ============================================================
-//  Тлумач — запись глагола в словарь verb-de
+//  Тлумач — запись в репозитории GitHub
 //  Кладётся как:  /api/vocab.js
 //
-//  Читает woerterbuch.json из репозитория, добавляет одну запись
-//  и коммитит обратно. Формат записи в точности как у существующих.
+//  Три цели, выбираются полем "kind":
+//    verb    → Verb_de / woerterbuch.json   — словарь глаголов (verb-de)
+//    noun    → Verb_de / substantive.json   — словарь существительных
+//    phrases → tlumach / phrases-mine.js    — свой разговорник
 //
 //  Environment Variables на Vercel:
-//    GITHUB_TOKEN   — обязательно. Fine-grained token, доступ только
-//                     к репозиторию Verb_de, право Contents: Read and write
-//    GITHUB_REPO    — по умолчанию Kesik80/Verb_de
-//    GITHUB_PATH    — по умолчанию woerterbuch.json
-//    GITHUB_BRANCH  — по умолчанию main
-//    ALLOWED_ORIGINS — как в translate.js
+//    GITHUB_TOKEN     — fine-grained token с доступом к ОБОИМ репозиториям,
+//                       право Contents: Read and write
+//    GITHUB_REPO_DICT — по умолчанию Kesik80/Verb_de
+//    GITHUB_REPO_APP  — по умолчанию Kesik80/tlumach
+//    GITHUB_BRANCH    — по умолчанию main
+//    ALLOWED_ORIGINS  — как в translate.js
 // ============================================================
 
-const REPO = process.env.GITHUB_REPO || 'Kesik80/Verb_de';
-const PATH = process.env.GITHUB_PATH || 'woerterbuch.json';
+const REPO_DICT = process.env.GITHUB_REPO_DICT || 'Kesik80/Verb_de';
+const REPO_APP = process.env.GITHUB_REPO_APP || 'Kesik80/tlumach';
 const BRANCH = process.env.GITHUB_BRANCH || 'main';
 const API = 'https://api.github.com';
 
+const TARGETS = {
+  verb: { repo: REPO_DICT, path: process.env.GITHUB_PATH || 'woerterbuch.json', format: 'dict' },
+  noun: { repo: REPO_DICT, path: 'substantive.json', format: 'dict' },
+  phrases: { repo: REPO_APP, path: 'phrases-mine.js', format: 'phrases' }
+};
+
 const PERSON_KEYS = ['ich', 'du', 'er/sie/es', 'wir', 'ihr', 'sie/Sie'];
 const TABLE_KEYS = ['praesens', 'praeteritum', 'perfekt', 'konjunktiv2'];
+const ARTICLES = ['der', 'die', 'das'];
 
-// Запись в чужой репозиторий дороже ошибки, чем лишний перевод,
-// поэтому лимит жёстче, чем у translate.
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 6;
 const hits = new Map();
@@ -42,49 +49,82 @@ module.exports = async function handler(req, res) {
   }
   if (!body || typeof body !== 'object') return fail(res, 400, 'Пустое тело запроса.');
 
-  const entry = validateEntry(body.entry);
-  if (!entry) return fail(res, 400, 'Карточка глагола заполнена не полностью.');
-
-  const key = entry.infinitiv;
-  delete entry.infinitiv;          // в файле инфинитив — это ключ, а не поле
-  const overwrite = body.overwrite === true;
+  const kind = body.kind === 'noun' ? 'noun' : body.kind === 'phrases' ? 'phrases' : 'verb';
+  const target = TARGETS[kind];
 
   try {
-    const current = await loadFile();
-    if (!current) return fail(res, 502, 'Не удалось прочитать словарь из GitHub.');
-
-    const { dict, sha } = current;
-    if (dict[key] && !overwrite) {
-      return res.status(409).json({
-        error: `«${key}» уже есть в словаре.`,
-        exists: true,
-        total: Object.keys(dict).length
-      });
-    }
-
-    entry.addedAt = new Date().toISOString();
-    dict[key] = entry;
-
-    // Ключи по алфавиту: файл правится и руками, диффы должны читаться.
-    const sorted = {};
-    Object.keys(dict).sort(function (a, b) {
-      return a.localeCompare(b, 'de');
-    }).forEach(function (k) { sorted[k] = dict[k]; });
-
-    const saved = await saveFile(sorted, sha, key, dict[key] && overwrite);
-    if (!saved.ok) return fail(res, 502, saved.message);
-
-    return res.status(200).json({
-      saved: true,
-      verb: key,
-      total: Object.keys(sorted).length
-    });
-
+    if (kind === 'phrases') return await savePhrases(res, body, target);
+    return await saveWord(res, body, target, kind);
   } catch (err) {
     console.error('vocab handler failed', err);
-    return fail(res, 500, 'Внутренняя ошибка при записи в словарь.');
+    return fail(res, 500, 'Внутренняя ошибка при записи.');
   }
 };
+
+// ---------- слова ----------
+
+async function saveWord(res, body, target, kind) {
+  const entry = kind === 'noun' ? validateNoun(body.entry) : validateVerb(body.entry);
+  if (!entry) {
+    return fail(res, 400, kind === 'noun'
+      ? 'Карточка существительного заполнена не полностью.'
+      : 'Карточка глагола заполнена не полностью.');
+  }
+
+  const key = entry.key;
+  delete entry.key;                       // в файле слово — это ключ, а не поле
+  const overwrite = body.overwrite === true;
+
+  // Файла существительных может ещё не быть — это не ошибка.
+  const current = await loadJson(target, kind === 'noun');
+  if (!current) return fail(res, 502, 'Не удалось прочитать файл из GitHub.');
+
+  const { data: dict, sha } = current;
+  if (dict[key] && !overwrite) {
+    return res.status(409).json({
+      error: `«${key}» уже есть в словаре.`,
+      exists: true,
+      total: Object.keys(dict).length
+    });
+  }
+
+  const isUpdate = !!dict[key];
+  entry.addedAt = new Date().toISOString();
+  dict[key] = entry;
+
+  const sorted = {};
+  Object.keys(dict).sort((a, b) => a.localeCompare(b, 'de')).forEach(k => { sorted[k] = dict[k]; });
+
+  const content = JSON.stringify(sorted, null, 2) + '\n';
+  const saved = await putFile(target, content, sha,
+    `${isUpdate ? 'Обновлено' : 'Добавлено'} ${kind === 'noun' ? 'существительное' : 'глагол'} ${key} (Тлумач)`);
+  if (!saved.ok) return fail(res, 502, saved.message);
+
+  return res.status(200).json({ saved: true, word: key, total: Object.keys(sorted).length });
+}
+
+// ---------- разговорник ----------
+
+async function savePhrases(res, body, target) {
+  const list = validatePhrases(body.phrases);
+  if (!list) return fail(res, 400, 'Список фраз пуст или составлен неверно.');
+
+  // Файл кладётся как .js, а не .json, намеренно: service worker
+  // не кэширует .json, и разговорник перестал бы работать офлайн.
+  const content = [
+    '/* Свой разговорник Тлумача. Файл перезаписывается из приложения,',
+    '   правки руками будут затёрты при следующем сохранении. */',
+    'window.TLUMACH_MY_PHRASES = ' + JSON.stringify(list, null, 2) + ';',
+    ''
+  ].join('\n');
+
+  const current = await loadRaw(target);   // может не существовать
+  const saved = await putFile(target, content, current ? current.sha : null,
+    `Разговорник: ${list.length} фраз (Тлумач)`);
+  if (!saved.ok) return fail(res, 502, saved.message);
+
+  return res.status(200).json({ saved: true, total: list.length });
+}
 
 // ---------- GitHub ----------
 
@@ -97,60 +137,64 @@ function ghHeaders() {
   };
 }
 
-async function loadFile() {
-  const url = `${API}/repos/${REPO}/contents/${encodeURIComponent(PATH)}?ref=${encodeURIComponent(BRANCH)}`;
+async function loadRaw(target) {
+  const url = `${API}/repos/${target.repo}/contents/${encodeURIComponent(target.path)}?ref=${encodeURIComponent(BRANCH)}`;
   const r = await fetch(url, { headers: ghHeaders() });
+  if (r.status === 404) return null;
   if (!r.ok) {
     console.error('GitHub read failed', r.status, (await r.text().catch(() => '')).slice(0, 300));
     return null;
   }
   const meta = await r.json();
-  let dict;
-  try {
-    dict = JSON.parse(Buffer.from(meta.content || '', 'base64').toString('utf8'));
-  } catch {
-    return null;
-  }
-  if (!dict || typeof dict !== 'object' || Array.isArray(dict)) return null;
-  return { dict, sha: meta.sha };
+  return { text: Buffer.from(meta.content || '', 'base64').toString('utf8'), sha: meta.sha };
 }
 
-async function saveFile(dict, sha, key, isUpdate) {
-  const url = `${API}/repos/${REPO}/contents/${encodeURIComponent(PATH)}`;
-  const content = Buffer.from(JSON.stringify(dict, null, 2) + '\n', 'utf8').toString('base64');
+async function loadJson(target, mayBeMissing) {
+  const raw = await loadRaw(target);
+  if (!raw) return mayBeMissing ? { data: {}, sha: null } : null;
+  let data;
+  try { data = JSON.parse(raw.text); } catch { return null; }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  return { data, sha: raw.sha };
+}
+
+async function putFile(target, content, sha, message) {
+  const url = `${API}/repos/${target.repo}/contents/${encodeURIComponent(target.path)}`;
+  const payload = {
+    message,
+    content: Buffer.from(content, 'utf8').toString('base64'),
+    branch: BRANCH
+  };
+  if (sha) payload.sha = sha;   // без sha GitHub создаёт новый файл
 
   const r = await fetch(url, {
     method: 'PUT',
     headers: Object.assign({ 'content-type': 'application/json' }, ghHeaders()),
-    body: JSON.stringify({
-      message: `${isUpdate ? 'Обновлён' : 'Добавлен'} глагол ${key} (Тлумач)`,
-      content,
-      sha,
-      branch: BRANCH
-    })
+    body: JSON.stringify(payload)
   });
-
   if (r.ok) return { ok: true };
 
   const detail = (await r.text().catch(() => '')).slice(0, 300);
-  console.error('GitHub write failed', r.status, detail);
-  if (r.status === 409) return { ok: false, message: 'Словарь изменился параллельно. Попробуй ещё раз.' };
-  if (r.status === 401 || r.status === 403) return { ok: false, message: 'GitHub отклонил токен. Проверь права Contents: Read and write.' };
-  if (r.status === 404) return { ok: false, message: `Файл ${PATH} в ${REPO} не найден.` };
+  console.error('GitHub write failed', r.status, target.repo, target.path, detail);
+  if (r.status === 409) return { ok: false, message: 'Файл изменился параллельно. Попробуй ещё раз.' };
+  if (r.status === 401 || r.status === 403) {
+    return { ok: false, message: `GitHub отклонил токен для ${target.repo}. Проверь, что репозиторий добавлен в права токена.` };
+  }
+  if (r.status === 404) return { ok: false, message: `Репозиторий ${target.repo} недоступен для этого токена.` };
   return { ok: false, message: `GitHub вернул ошибку (${r.status}).` };
 }
 
-// ---------- проверка карточки ----------
+// ---------- проверка данных ----------
 
-function validateEntry(input) {
+const str = v => (typeof v === 'string' ? v.trim() : '');
+
+function validateVerb(input) {
   if (!input || typeof input !== 'object') return null;
 
-  const str = v => (typeof v === 'string' ? v.trim() : '');
   const infinitiv = str(input.infinitiv).slice(0, 40);
   const bedeutung = str(input.bedeutung).slice(0, 200);
   const hauptformen = str(input.hauptformen).slice(0, 120);
   const hilfsverb = str(input.hilfsverb);
-  const typ = str(input.typ);
 
   if (!infinitiv || !/^[A-Za-zÄÖÜäöüß-]{2,40}$/.test(infinitiv)) return null;
   if (!bedeutung || !hauptformen) return null;
@@ -170,16 +214,64 @@ function validateEntry(input) {
   }
 
   return {
-    infinitiv,
+    key: infinitiv,
     niveau: str(input.niveau).slice(0, 4) || 'B1',
-    typ: typ || 'regelmäßig',
+    typ: str(input.typ) || 'regelmäßig',
     hilfsverb,
     bedeutung,
-    // В существующих записях hauptformen — объект с text и mp3.
-    // mp3 не выдумываем: verb-de читает его через ?. и переживёт отсутствие.
     hauptformen: { text: hauptformen },
     tabelle
   };
+}
+
+function validateNoun(input) {
+  if (!input || typeof input !== 'object') return null;
+
+  const wort = str(input.wort).slice(0, 60);
+  const artikel = str(input.artikel).toLowerCase();
+  const plural = str(input.plural).slice(0, 80);
+  const bedeutung = str(input.bedeutung).slice(0, 200);
+
+  if (!wort || !/^[A-Za-zÄÖÜäöüß -]{2,60}$/.test(wort)) return null;
+  if (ARTICLES.indexOf(artikel) === -1) return null;   // род обязателен, это суть карточки
+  if (!plural || !bedeutung) return null;
+
+  const beispiele = (Array.isArray(input.beispiele) ? input.beispiele : [])
+    .filter(b => b && str(b.de) && str(b.ru))
+    .slice(0, 3)
+    .map(b => ({ de: str(b.de).slice(0, 200), ru: str(b.ru).slice(0, 200) }));
+
+  return {
+    key: wort,
+    artikel,
+    plural,
+    genitiv: str(input.genitiv).slice(0, 80),
+    bedeutung,
+    niveau: str(input.niveau).slice(0, 4) || 'B1',
+    beispiele
+  };
+}
+
+function validatePhrases(input) {
+  if (!Array.isArray(input)) return null;
+
+  const list = input
+    .filter(p => p && typeof p === 'object')
+    .map(p => {
+      const item = {
+        id: str(p.id).slice(0, 40) || ('p' + Math.random().toString(36).slice(2, 10)),
+        de: str(p.de).slice(0, 300),
+        ru: str(p.ru).slice(0, 300),
+        uk: str(p.uk).slice(0, 300)
+      };
+      return (item.de || item.ru || item.uk) ? item : null;
+    })
+    .filter(Boolean)
+    .slice(0, 300);
+
+  // Пустой список — это законное «удалить всё», но у него слишком высокая
+  // цена случайного нажатия, поэтому его не принимаем.
+  return list.length ? list : null;
 }
 
 // ---------- общее ----------

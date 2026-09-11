@@ -145,7 +145,7 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
   padding:16px 16px 12px;
 }
 .out p.text{font-family:var(--serif);font-size:19px;line-height:1.55;margin:0;white-space:pre-wrap}
-.tools{display:flex;gap:6px;margin-top:14px;padding-top:10px;border-top:1px solid var(--rule)}
+.tools{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;padding-top:10px;border-top:1px solid var(--rule)}
 .tool{
   background:transparent;border:1px solid var(--rule);color:var(--soft);
   border-radius:7px;font:inherit;font-size:13px;padding:6px 11px;cursor:pointer;
@@ -241,7 +241,7 @@ details.panel[open]>summary::after{content:" ▴"}
 <body>
 
 <h1>Übersetzer</h1>
-<p class="tagline">Немецкий, русский, украинский — перевод и словарь <span style="opacity:.6">· сборка 11.09 12:20</span></p>
+<p class="tagline">Немецкий, русский, украинский — перевод и словарь</p>
 
 <div class="bar">
   <div class="pills" id="fromPills" role="group" aria-label="Язык оригинала"></div>
@@ -290,7 +290,9 @@ details.panel[open]>summary::after{content:" ▴"}
   <div class="gloss-actions">
     <button class="ghost" id="btnPhraseNew" type="button">Добавить фразу</button>
     <button class="ghost" id="btnPhraseEdit" type="button" aria-pressed="false">Править</button>
+    <button class="ghost" id="btnPhrasePush" type="button">Сохранить в GitHub</button>
   </div>
+  <div class="gloss-count" id="phrasePushNote"></div>
 
   <div class="editor hidden" id="phraseEditor">
     <div class="field">
@@ -336,6 +338,7 @@ details.panel[open]>summary::after{content:" ▴"}
 </details>
 
 <script src="phrases.js"></script>
+<script src="phrases-mine.js"></script>
 <script>
 (function () {
   'use strict';
@@ -395,6 +398,8 @@ details.panel[open]>summary::after{content:" ▴"}
     phraseSave: document.getElementById('btnPhraseSave'),
     phraseCancel: document.getElementById('btnPhraseCancel'),
     phraseStatus: document.getElementById('phraseStatus'),
+    phrasePush: document.getElementById('btnPhrasePush'),
+    phrasePushNote: document.getElementById('phrasePushNote'),
     meet: document.getElementById('btnMeet'),
     tone: document.getElementById('btnTone'),
     simple: document.getElementById('btnSimple'),
@@ -591,7 +596,6 @@ details.panel[open]>summary::after{content:" ▴"}
     var handle = openTextBox();
     var acc = '';
     var firstAt = 0;
-    var serverMode = res.headers.get('X-Mode') || '';
 
     function finish() {
       handle.p.textContent = acc;
@@ -600,7 +604,7 @@ details.panel[open]>summary::after{content:" ▴"}
       // и текстовый перевод оседал под словарным ключом.
       cacheSet(source, { mode: 'text', translation: acc }, mode || 'text');
       addHistory(source);
-      setStatus(streamTiming(sentAt, firstAt, serverMode));
+      setStatus(streamTiming(sentAt, firstAt));
     }
 
     // Старые движки без ReadableStream просто получат текст целиком.
@@ -631,13 +635,11 @@ details.panel[open]>summary::after{content:" ▴"}
     return pump();
   }
 
-  function streamTiming(sentAt, firstAt, serverMode) {
+  function streamTiming(sentAt, firstAt) {
     var total = ((Date.now() - sentAt) / 1000).toFixed(1);
-    var line = firstAt
+    return firstAt
       ? 'Первые слова через ' + ((firstAt - sentAt) / 1000).toFixed(1) + ' с · всего ' + total + ' с'
       : 'Всего ' + total + ' с';
-    // Маячок: какой режим сервер на самом деле выполнил.
-    return serverMode ? line + ' · сервер: ' + serverMode : line;
   }
 
   function timingLine(data, sentAt) {
@@ -878,7 +880,9 @@ details.panel[open]>summary::after{content:" ▴"}
     // woerterbuch.json в verb-de — словарь глаголов, поэтому кнопка
     // показывается только для немецкого глагола.
     if (state.from === 'de' && /глагол/i.test(entry.pos || '')) {
-      box.appendChild(verbSaveRow(headwordText));
+      box.appendChild(wordSaveRow(headwordText, 'verb'));
+    } else if (state.from === 'de' && /существительное/i.test(entry.pos || '')) {
+      box.appendChild(wordSaveRow(headwordText, 'noun'));
     }
 
     el.result.appendChild(box);
@@ -998,21 +1002,26 @@ details.panel[open]>summary::after{content:" ▴"}
 
   // ---------- сохранение глагола в verb-de ----------
 
-  function verbSaveRow(infinitive) {
+  var SAVE_LABEL = {
+    verb: { button: 'В словарь verb-de', field: 'verb', check: 'infinitiv' },
+    noun: { button: 'В словарь существительных', field: 'noun', check: 'wort' }
+  };
+
+  function wordSaveRow(word, kind) {
     var row = document.createElement('div');
     row.className = 'alt';
 
     var btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'tool';
-    btn.textContent = 'В словарь verb-de';
+    btn.textContent = SAVE_LABEL[kind].button;
 
     var note = document.createElement('span');
     note.className = 'gloss-count';
     note.style.marginLeft = '8px';
 
     btn.addEventListener('click', function () {
-      saveVerb(infinitive, btn, note, false);
+      saveWord(word, kind, btn, note, false);
     });
 
     row.appendChild(btn);
@@ -1022,20 +1031,22 @@ details.panel[open]>summary::after{content:" ▴"}
 
   // Две ступени: сначала модель строит карточку в формате woerterbuch.json,
   // потом сервер коммитит её в репозиторий.
-  function saveVerb(infinitive, btn, note, overwrite) {
+  function saveWord(word, kind, btn, note, overwrite) {
+    var spec = SAVE_LABEL[kind];
     btn.disabled = true;
     note.textContent = 'Строю карточку…';
 
     fetch('/api/translate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: 'verb', from: 'de', to: 'ru', text: infinitive })
+      body: JSON.stringify({ mode: spec.field, from: 'de', to: 'ru', text: word })
     })
       .then(function (res) {
         return res.json().catch(function () { return {}; }).then(function (data) {
           if (!res.ok) throw new Error(data.error || ('Ошибка ' + res.status));
-          if (!data.verb || !data.verb.infinitiv) throw new Error('Модель не собрала карточку.');
-          return data.verb;
+          var card = data[spec.field];
+          if (!card || !card[spec.check]) throw new Error('Модель не собрала карточку.');
+          return card;
         });
       })
       .then(function (card) {
@@ -1043,7 +1054,7 @@ details.panel[open]>summary::after{content:" ▴"}
         return fetch('/api/vocab', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ entry: card, overwrite: overwrite })
+          body: JSON.stringify({ kind: kind, entry: card, overwrite: overwrite })
         }).then(function (res) {
           return res.json().catch(function () { return {}; }).then(function (data) {
             if (res.status === 409 && data.exists) {
@@ -1055,7 +1066,7 @@ details.panel[open]>summary::after{content:" ▴"}
               again.textContent = 'Перезаписать';
               again.addEventListener('click', function () {
                 again.remove();
-                saveVerb(infinitive, btn, note, true);
+                saveWord(word, kind, btn, note, true);
               });
               note.appendChild(again);
               btn.disabled = false;
@@ -1471,6 +1482,54 @@ details.panel[open]>summary::after{content:" ▴"}
     return Array.isArray(list) ? list : [];
   }
 
+  // Фразы из репозитория подмешиваются к локальным по id. Так после
+  // переустановки или на другом телефоне они возвращаются сами.
+  function mergeRemotePhrases() {
+    var remote = window.TLUMACH_MY_PHRASES;
+    if (!Array.isArray(remote) || !remote.length) return;
+
+    var local = myPhrases();
+    var seen = {};
+    local.forEach(function (p) { if (p && p.id) seen[p.id] = true; });
+
+    var added = 0;
+    remote.forEach(function (p) {
+      if (!p || !p.id || seen[p.id]) return;
+      local.push({ id: p.id, de: p.de || '', ru: p.ru || '', uk: p.uk || '' });
+      added++;
+    });
+    if (added) saveMine(local);
+  }
+
+  function pushPhrases() {
+    var list = myPhrases();
+    if (!list.length) {
+      el.phrasePushNote.textContent = 'Своих фраз пока нет';
+      return;
+    }
+    el.phrasePush.disabled = true;
+    el.phrasePushNote.textContent = 'Сохраняю в репозиторий…';
+
+    fetch('/api/vocab', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'phrases', phrases: list })
+    })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (!res.ok) throw new Error(data.error || ('Ошибка ' + res.status));
+          return data;
+        });
+      })
+      .then(function (data) {
+        el.phrasePushNote.textContent = 'Сохранено в GitHub · фраз ' + data.total;
+      })
+      .catch(function (err) {
+        el.phrasePushNote.textContent = err.message || 'Не получилось сохранить.';
+      })
+      .then(function () { el.phrasePush.disabled = false; });
+  }
+
   function saveMine(list) { write(MINE_KEY, list); }
 
   // Что показать крупно, что мелко: крупно — язык оригинала,
@@ -1815,6 +1874,9 @@ details.panel[open]>summary::after{content:" ▴"}
   } else {
     el.mic.style.display = 'none';
   }
+
+  el.phrasePush.addEventListener('click', pushPhrases);
+  mergeRemotePhrases();
 
   el.glossText.value = read(GLOSS_KEY, '');
   renderGlossCount();
