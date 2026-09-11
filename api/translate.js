@@ -441,7 +441,9 @@ const NOUN_SCHEMA = {
       }
     }
   },
-  required: ['wort', 'artikel', 'plural', 'bedeutung']
+  // Всё перечислено намеренно: необязательные поля модель молча пропускает,
+  // и в файл попадают пустые genitiv и beispiele.
+  required: ['wort', 'artikel', 'plural', 'genitiv', 'bedeutung', 'niveau', 'beispiele']
 };
 
 const PHOTO_SCHEMA = {
