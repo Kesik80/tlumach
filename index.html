@@ -104,6 +104,38 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
   border-radius:9px;font:inherit;font-size:14px;padding:10px 14px;cursor:pointer;
 }
 
+.extras{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
+.xtr{
+  background:transparent;color:var(--soft);border:1px solid var(--rule);
+  border-radius:9px;font:inherit;font-size:13px;padding:8px 12px;cursor:pointer;
+}
+.xtr[disabled]{opacity:.4}
+.card{background:var(--card);border:1px solid var(--rule);border-radius:11px;padding:16px;margin-top:12px}
+.card h3{font-size:12px;font-weight:600;color:var(--soft);margin:0 0 8px}
+.event{border-top:1px solid var(--rule);padding-top:12px;margin-top:12px}
+.event:first-of-type{border-top:0;padding-top:0;margin-top:0}
+.event .when{font-family:var(--serif);font-size:20px}
+.event .what{font-size:16px;margin-top:2px}
+.event .where{color:var(--soft);font-size:14px;margin-top:2px}
+.cal{
+  display:inline-block;margin-top:10px;background:var(--btn-bg);color:var(--btn-ink);
+  border:0;border-radius:9px;font:inherit;font-size:14px;padding:9px 16px;
+  text-decoration:none;cursor:pointer;
+}
+.badge{
+  display:inline-block;border:1px solid var(--rule);border-radius:6px;
+  padding:2px 8px;font-size:12px;color:var(--soft);margin-left:8px;
+}
+.badge.du{border-color:var(--plural);color:var(--plural)}
+.badge.sie{border-color:var(--der);color:var(--der)}
+.alt{border-top:1px solid var(--rule);margin-top:12px;padding-top:12px}
+.alt h4{font-size:12px;font-weight:600;color:var(--soft);margin:0 0 4px}
+.alt p{font-family:var(--serif);font-size:17px;margin:0;white-space:pre-wrap}
+.warn-list{margin:8px 0 0;padding-left:18px;font-size:14px;color:var(--warn)}
+.warn-list li{margin-bottom:3px}
+.terms{margin:10px 0 0;display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:14px}
+.terms dt{font-family:var(--serif)}
+.terms dd{margin:0;color:var(--soft)}
 #status{margin-top:18px;color:var(--soft);font-size:14px;min-height:0}
 #status.error{color:var(--die)}
 
@@ -234,6 +266,15 @@ details.panel[open]>summary::after{content:" ▴"}
   </span>
 </div>
 
+<input type="file" id="fileImg" accept="image/*" hidden>
+
+<div class="extras">
+  <button class="xtr" id="btnPhoto" type="button">📷 Фото</button>
+  <button class="xtr" id="btnMeet" type="button">📅 Встреча</button>
+  <button class="xtr" id="btnTone" type="button">✍️ Тон</button>
+  <button class="xtr" id="btnSimple" type="button">📖 Проще</button>
+</div>
+
 <div id="status"></div>
 <div id="result"></div>
 
@@ -304,7 +345,12 @@ details.panel[open]>summary::after{content:" ▴"}
     { code: 'ru', label: 'RU', voice: 'ru-RU' },
     { code: 'uk', label: 'UA', voice: 'uk-UA' }
   ];
-  var LIMIT = { text: 5000, dict: 120 };
+  var LIMIT = { text: 5000, dict: 120, meet: 3000, tone: 2000, simple: 4000 };
+  var WORKING = {
+    text: 'Перевожу…', dict: 'Смотрю в словаре…',
+    meet: 'Ищу договорённости…', tone: 'Проверяю тон…', simple: 'Упрощаю…',
+    photo: 'Читаю снимок…'
+  };
   var PLACEHOLDER = { text: 'Текст для перевода', dict: 'Слово или короткая фраза' };
   var CACHE_KEY = 'ueb_cache';
   var HIST_KEY = 'ueb_history';
@@ -348,7 +394,12 @@ details.panel[open]>summary::after{content:" ▴"}
     fldUk: document.getElementById('fldUk'),
     phraseSave: document.getElementById('btnPhraseSave'),
     phraseCancel: document.getElementById('btnPhraseCancel'),
-    phraseStatus: document.getElementById('phraseStatus')
+    phraseStatus: document.getElementById('phraseStatus'),
+    meet: document.getElementById('btnMeet'),
+    tone: document.getElementById('btnTone'),
+    simple: document.getElementById('btnSimple'),
+    photo: document.getElementById('btnPhoto'),
+    file: document.getElementById('fileImg')
   };
 
   // ---------- хранилище ----------
@@ -363,8 +414,8 @@ details.panel[open]>summary::after{content:" ▴"}
     try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* квота */ }
   }
 
-  function cacheKey(text) {
-    return state.mode + '|' + state.from + '|' + state.to + '|' + glossHash() + '|' + text;
+  function cacheKey(text, mode) {
+    return (mode || state.mode) + '|' + state.from + '|' + state.to + '|' + glossHash() + '|' + text;
   }
 
   // Короткий хэш глоссария: при его правке старые переводы должны
@@ -377,13 +428,13 @@ details.panel[open]>summary::after{content:" ▴"}
     }
     return h.toString(36);
   }
-  function cacheGet(text) {
+  function cacheGet(text, mode) {
     var store = read(CACHE_KEY, {});
-    return store[cacheKey(text)] || null;
+    return store[cacheKey(text, mode)] || null;
   }
-  function cacheSet(text, payload) {
+  function cacheSet(text, payload, mode) {
     var store = read(CACHE_KEY, {});
-    store[cacheKey(text)] = { at: Date.now(), payload: payload };
+    store[cacheKey(text, mode)] = { at: Date.now(), payload: payload };
     var keys = Object.keys(store);
     if (keys.length > CACHE_MAX) {
       keys.sort(function (a, b) { return store[a].at - store[b].at; });
@@ -453,7 +504,12 @@ details.panel[open]>summary::after{content:" ▴"}
     var max = LIMIT[state.mode];
     el.count.textContent = len + ' / ' + max;
     el.count.classList.toggle('over', len > max);
-    el.go.disabled = busy || len === 0 || len > max;
+    var idle = busy || len === 0;
+    el.go.disabled = idle || len > max;
+    el.meet.disabled = idle;
+    el.tone.disabled = idle;
+    el.simple.disabled = idle;
+    el.photo.disabled = busy;  // снимку текст в поле не нужен
   }
 
   function autoGrow() {
@@ -463,12 +519,18 @@ details.panel[open]>summary::after{content:" ▴"}
 
   // ---------- запрос ----------
 
-  function translate() {
+  // Обычный перевод и словарь идут по вкладке, остальные режимы —
+  // разовые действия поверх того же текста.
+  function translate(override) {
+    var mode = override || state.mode;
     var text = el.input.value.trim();
     if (!text || busy) return;
-    if (text.length > LIMIT[state.mode]) return;
+    if (text.length > (LIMIT[mode] || 5000)) {
+      setStatus('Слишком длинный текст для этого действия.', true);
+      return;
+    }
 
-    var cached = cacheGet(text);
+    var cached = cacheGet(text, mode);
     if (cached) {
       show(cached.payload);
       addHistory(text);
@@ -478,7 +540,7 @@ details.panel[open]>summary::after{content:" ▴"}
 
     busy = true;
     updateCount();
-    setStatus('Перевожу…');
+    setStatus(WORKING[mode] || 'Перевожу…');
     el.result.innerHTML = '';
     var sentAt = Date.now();
 
@@ -486,8 +548,8 @@ details.panel[open]>summary::after{content:" ▴"}
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        text: text, from: state.from, to: state.to, mode: state.mode,
-        glossary: glossaryPairs()
+        text: text, from: state.from, to: state.to, mode: mode,
+        glossary: glossaryPairs(), now: localNow()
       })
     })
       .then(function (res) {
@@ -501,7 +563,7 @@ details.panel[open]>summary::after{content:" ▴"}
         if (ct.indexOf('text/plain') === 0) return readStream(res, text, sentAt);
 
         return res.json().then(function (data) {
-          cacheSet(text, data);
+          cacheSet(text, data, mode);
           addHistory(text);
           show(data);
           setStatus(timingLine(data, sentAt));
@@ -590,8 +652,21 @@ details.panel[open]>summary::after{content:" ▴"}
   function show(data) {
     el.result.innerHTML = '';
     if (data.entry) renderEntry(data.entry);
+    else if (data.meet) renderMeet(data.meet);
+    else if (data.tone) renderTone(data.tone);
+    else if (data.simple) renderSimple(data.simple);
+    else if (data.photo) renderPhoto(data.photo);
     else if (data.translation) renderText(data.translation);
     else setStatus('Пустой ответ от сервера.', true);
+  }
+
+  // Локальное «сейчас» для разбора «завтра в 20:30»: у сервера нет
+  // ни часового пояса пользователя, ни его календаря.
+  function localNow() {
+    var d = new Date();
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+      'T' + p(d.getHours()) + ':' + p(d.getMinutes());
   }
 
   function openTextBox() {
@@ -778,6 +853,13 @@ details.panel[open]>summary::after{content:" ▴"}
     var headwordText = entry.headword || el.input.value.trim();
     lastOutput = { text: spoken.join('; '), lang: state.to };
     box.appendChild(toolbar(spoken.join('; '), state.to, headwordText, state.from));
+
+    // woerterbuch.json в verb-de — словарь глаголов, поэтому кнопка
+    // показывается только для немецкого глагола.
+    if (state.from === 'de' && /глагол/i.test(entry.pos || '')) {
+      box.appendChild(verbSaveRow(headwordText));
+    }
+
     el.result.appendChild(box);
   }
 
@@ -891,6 +973,434 @@ details.panel[open]>summary::after{content:" ▴"}
       });
       el.histList.appendChild(b);
     });
+  }
+
+  // ---------- сохранение глагола в verb-de ----------
+
+  function verbSaveRow(infinitive) {
+    var row = document.createElement('div');
+    row.className = 'alt';
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tool';
+    btn.textContent = 'В словарь verb-de';
+
+    var note = document.createElement('span');
+    note.className = 'gloss-count';
+    note.style.marginLeft = '8px';
+
+    btn.addEventListener('click', function () {
+      saveVerb(infinitive, btn, note, false);
+    });
+
+    row.appendChild(btn);
+    row.appendChild(note);
+    return row;
+  }
+
+  // Две ступени: сначала модель строит карточку в формате woerterbuch.json,
+  // потом сервер коммитит её в репозиторий.
+  function saveVerb(infinitive, btn, note, overwrite) {
+    btn.disabled = true;
+    note.textContent = 'Строю карточку…';
+
+    fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'verb', from: 'de', to: 'ru', text: infinitive })
+    })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (!res.ok) throw new Error(data.error || ('Ошибка ' + res.status));
+          if (!data.verb || !data.verb.infinitiv) throw new Error('Модель не собрала карточку.');
+          return data.verb;
+        });
+      })
+      .then(function (card) {
+        note.textContent = 'Записываю в репозиторий…';
+        return fetch('/api/vocab', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ entry: card, overwrite: overwrite })
+        }).then(function (res) {
+          return res.json().catch(function () { return {}; }).then(function (data) {
+            if (res.status === 409 && data.exists) {
+              // Уже есть: предлагаем перезаписать, но не молча.
+              note.textContent = data.error + ' ';
+              var again = document.createElement('button');
+              again.type = 'button';
+              again.className = 'tool';
+              again.textContent = 'Перезаписать';
+              again.addEventListener('click', function () {
+                again.remove();
+                saveVerb(infinitive, btn, note, true);
+              });
+              note.appendChild(again);
+              btn.disabled = false;
+              return null;
+            }
+            if (!res.ok) throw new Error(data.error || ('Ошибка ' + res.status));
+            return data;
+          });
+        });
+      })
+      .then(function (data) {
+        if (!data) return;
+        note.textContent = 'Сохранено · всего в словаре ' + data.total;
+        btn.textContent = 'Готово';
+      })
+      .catch(function (err) {
+        note.textContent = err.message || 'Не получилось сохранить.';
+        btn.disabled = false;
+      });
+  }
+
+  // ---------- фото ----------
+
+  var PHOTO_MAX_SIDE = 1600;   // больше модели не нужно, а трафик и токены экономит
+  var PHOTO_QUALITY = 0.78;
+
+  // Ужимаем снимок в браузере: телефонное фото на 12 Мп — это лишние
+  // мегабайты аплоада с мобильного интернета и лишние токены на входе.
+  function shrinkImage(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+
+      img.onload = function () {
+        var scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(img.width, img.height));
+        var w = Math.round(img.width * scale);
+        var h = Math.round(img.height * scale);
+
+        var canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+
+        var dataUrl;
+        try {
+          dataUrl = canvas.toDataURL('image/jpeg', PHOTO_QUALITY);
+        } catch (e) {
+          reject(new Error('Не удалось обработать снимок.'));
+          return;
+        }
+        resolve({ type: 'image/jpeg', data: dataUrl.split(',')[1] });
+      };
+
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error('Не удалось открыть снимок.'));
+      };
+      img.src = url;
+    });
+  }
+
+  function translatePhoto(file) {
+    if (!file || busy) return;
+
+    busy = true;
+    updateCount();
+    setStatus('Готовлю снимок…');
+    el.result.innerHTML = '';
+    var sentAt = Date.now();
+
+    shrinkImage(file)
+      .then(function (image) {
+        setStatus(WORKING.photo);
+        return fetch('/api/translate', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            mode: 'photo', from: state.from, to: state.to,
+            image: image, glossary: glossaryPairs()
+          })
+        });
+      })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (!res.ok) throw new Error(data.error || ('Ошибка ' + res.status));
+          return data;
+        });
+      })
+      .then(function (data) {
+        show(data);
+        setStatus(timingLine(data, sentAt));
+      })
+      .catch(function (err) {
+        setStatus(err.message || 'Не удалось прочитать снимок.', true);
+      })
+      .then(function () {
+        busy = false;
+        updateCount();
+      });
+  }
+
+  function renderPhoto(data) {
+    var box = document.createElement('div');
+    box.className = 'card';
+
+    var h = document.createElement('h3');
+    h.textContent = data.kind ? 'Со снимка · ' + data.kind : 'Со снимка';
+    box.appendChild(h);
+
+    var tr = document.createElement('p');
+    tr.textContent = data.translation || '';
+    tr.style.fontFamily = 'var(--serif)';
+    tr.style.fontSize = '18px';
+    tr.style.margin = '0';
+    tr.style.whiteSpace = 'pre-wrap';
+    box.appendChild(tr);
+    box.appendChild(toolbar(data.translation || '', state.to));
+
+    if (data.source) {
+      var alt = document.createElement('div');
+      alt.className = 'alt';
+      var t = document.createElement('h4');
+      t.textContent = 'Оригинал';
+      var p = document.createElement('p');
+      p.textContent = data.source;
+      p.style.fontSize = '15px';
+      alt.appendChild(t);
+      alt.appendChild(p);
+      box.appendChild(alt);
+
+      // Распознанный текст кладём в поле ввода: тогда к нему сразу
+      // применимы «Проще», «Встреча» и словарь, без повторного снимка.
+      el.input.value = data.source.slice(0, LIMIT.text);
+      autoGrow();
+      updateCount();
+    }
+
+    el.result.appendChild(box);
+  }
+
+  // ---------- встречи ----------
+
+  var MONTHS = ['января','февраля','марта','апреля','мая','июня',
+                'июля','августа','сентября','октября','ноября','декабря'];
+
+  function humanWhen(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    var today = new Date();
+    var sameDay = d.toDateString() === today.toDateString();
+    var tomorrow = new Date(today.getTime() + 86400000);
+    var isTomorrow = d.toDateString() === tomorrow.toDateString();
+    var day = sameDay ? 'сегодня' :
+      isTomorrow ? 'завтра' :
+      d.getDate() + ' ' + MONTHS[d.getMonth()];
+    return day + ', ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  // Ссылка на шаблон Google Календаря: открывается формой создания
+  // события, где всё уже заполнено, остаётся нажать «Сохранить».
+  function calendarUrl(ev) {
+    var start = new Date(ev.start);
+    if (isNaN(start.getTime())) return null;
+    var end = ev.end ? new Date(ev.end) : null;
+    if (!end || isNaN(end.getTime())) end = new Date(start.getTime() + 3600000);
+
+    function stamp(d) {
+      return d.toISOString().slice(0, 19).replace(/[-:]/g, '') + 'Z';
+    }
+    var q = new URLSearchParams();
+    q.set('action', 'TEMPLATE');
+    q.set('text', ev.title || 'Встреча');
+    q.set('dates', stamp(start) + '/' + stamp(end));
+    if (ev.location) q.set('location', ev.location);
+    var details = [ev.who ? 'Кто: ' + ev.who : '', ev.note || ''].filter(Boolean).join('\n');
+    if (details) q.set('details', details);
+    return 'https://calendar.google.com/calendar/render?' + q.toString();
+  }
+
+  function renderMeet(data) {
+    var box = document.createElement('div');
+    box.className = 'card';
+    var events = Array.isArray(data.events) ? data.events : [];
+
+    if (!events.length) {
+      var h = document.createElement('h3');
+      h.textContent = 'Договорённостей не нашлось';
+      box.appendChild(h);
+      if (data.summary) {
+        var p = document.createElement('div');
+        p.textContent = data.summary;
+        box.appendChild(p);
+      }
+      el.result.appendChild(box);
+      return;
+    }
+
+    if (data.summary) {
+      var sum = document.createElement('h3');
+      sum.textContent = data.summary;
+      box.appendChild(sum);
+    }
+
+    events.forEach(function (ev) {
+      var wrap = document.createElement('div');
+      wrap.className = 'event';
+
+      var when = document.createElement('div');
+      when.className = 'when';
+      when.textContent = humanWhen(ev.start);
+      wrap.appendChild(when);
+
+      var what = document.createElement('div');
+      what.className = 'what';
+      what.textContent = ev.title + (ev.who ? ' — ' + ev.who : '');
+      wrap.appendChild(what);
+
+      if (ev.location) {
+        var where = document.createElement('div');
+        where.className = 'where';
+        where.textContent = ev.location;
+        wrap.appendChild(where);
+      }
+      if (ev.note) {
+        var note = document.createElement('div');
+        note.className = 'where';
+        note.textContent = ev.note;
+        wrap.appendChild(note);
+      }
+
+      var url = calendarUrl(ev);
+      if (url) {
+        var a = document.createElement('a');
+        a.className = 'cal';
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = 'В календарь';
+        wrap.appendChild(a);
+      }
+      box.appendChild(wrap);
+    });
+
+    el.result.appendChild(box);
+  }
+
+  // ---------- проверка тона ----------
+
+  function renderTone(data) {
+    var box = document.createElement('div');
+    box.className = 'card';
+
+    var h = document.createElement('h3');
+    h.textContent = 'Немецкий вариант';
+    var reg = String(data.register || '').toLowerCase();
+    var badge = document.createElement('span');
+    badge.className = 'badge' + (reg === 'du' ? ' du' : reg === 'sie' ? ' sie' : '');
+    badge.textContent = data.register || '';
+    if (data.register) h.appendChild(badge);
+    box.appendChild(h);
+
+    var main = document.createElement('p');
+    main.className = 'text';
+    main.textContent = data.de || '';
+    main.style.fontFamily = 'var(--serif)';
+    main.style.fontSize = '19px';
+    main.style.margin = '0';
+    main.style.whiteSpace = 'pre-wrap';
+    box.appendChild(main);
+    box.appendChild(toolbar(data.de || '', 'de'));
+
+    var notes = Array.isArray(data.notes) ? data.notes.filter(Boolean) : [];
+    if (notes.length) {
+      var ul = document.createElement('ul');
+      ul.className = 'warn-list';
+      notes.forEach(function (n) {
+        var li = document.createElement('li');
+        li.textContent = n;
+        ul.appendChild(li);
+      });
+      box.appendChild(ul);
+    }
+
+    [['Мягче', data.softer], ['Жёстче', data.firmer]].forEach(function (pair) {
+      if (!pair[1]) return;
+      var alt = document.createElement('div');
+      alt.className = 'alt';
+      var t = document.createElement('h4');
+      t.textContent = pair[0];
+      var p = document.createElement('p');
+      p.textContent = pair[1];
+      alt.appendChild(t);
+      alt.appendChild(p);
+      alt.appendChild(toolbar(pair[1], 'de'));
+      box.appendChild(alt);
+    });
+
+    el.result.appendChild(box);
+  }
+
+  // ---------- Amtsdeutsch попроще ----------
+
+  function renderSimple(data) {
+    var box = document.createElement('div');
+    box.className = 'card';
+
+    var h = document.createElement('h3');
+    h.textContent = 'Простым немецким';
+    box.appendChild(h);
+
+    var simple = document.createElement('p');
+    simple.textContent = data.simple || '';
+    simple.style.fontFamily = 'var(--serif)';
+    simple.style.fontSize = '18px';
+    simple.style.margin = '0';
+    simple.style.whiteSpace = 'pre-wrap';
+    box.appendChild(simple);
+    box.appendChild(toolbar(data.simple || '', 'de'));
+
+    if (data.gist) {
+      var alt = document.createElement('div');
+      alt.className = 'alt';
+      var t = document.createElement('h4');
+      t.textContent = 'О чём это';
+      var p = document.createElement('p');
+      p.textContent = data.gist;
+      p.style.fontFamily = 'var(--sans)';
+      p.style.fontSize = '15px';
+      alt.appendChild(t);
+      alt.appendChild(p);
+      box.appendChild(alt);
+    }
+
+    if (data.deadline) {
+      var dl = document.createElement('div');
+      dl.className = 'caution';
+      dl.textContent = 'Срок: ' + data.deadline;
+      box.appendChild(dl);
+    }
+
+    var terms = Array.isArray(data.terms) ? data.terms.filter(function (t) {
+      return t && t.term && t.meaning;
+    }) : [];
+    if (terms.length) {
+      var alt2 = document.createElement('div');
+      alt2.className = 'alt';
+      var t2 = document.createElement('h4');
+      t2.textContent = 'Термины';
+      alt2.appendChild(t2);
+      var dl2 = document.createElement('dl');
+      dl2.className = 'terms';
+      terms.forEach(function (item) {
+        var dt = document.createElement('dt');
+        dt.textContent = item.term;
+        var dd = document.createElement('dd');
+        dd.textContent = item.meaning;
+        dl2.appendChild(dt);
+        dl2.appendChild(dd);
+      });
+      alt2.appendChild(dl2);
+      box.appendChild(alt2);
+    }
+
+    el.result.appendChild(box);
   }
 
   // ---------- глоссарий ----------
@@ -1249,6 +1759,15 @@ details.panel[open]>summary::after{content:" ▴"}
   });
 
   el.paste.addEventListener('click', pasteAndTranslate);
+  el.photo.addEventListener('click', function () { el.file.click(); });
+  el.file.addEventListener('change', function () {
+    var f = el.file.files && el.file.files[0];
+    el.file.value = '';   // иначе тот же снимок второй раз не выберется
+    translatePhoto(f);
+  });
+  el.meet.addEventListener('click', function () { translate('meet'); });
+  el.tone.addEventListener('click', function () { translate('tone'); });
+  el.simple.addEventListener('click', function () { translate('simple'); });
 
   el.phraseNew.addEventListener('click', function () { openEditor(null); });
   el.phraseSave.addEventListener('click', savePhrase);
