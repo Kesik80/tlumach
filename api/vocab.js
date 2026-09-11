@@ -262,7 +262,8 @@ function validatePhrases(input) {
         id: str(p.id).slice(0, 40) || ('p' + Math.random().toString(36).slice(2, 10)),
         de: str(p.de).slice(0, 300),
         ru: str(p.ru).slice(0, 300),
-        uk: str(p.uk).slice(0, 300)
+        uk: str(p.uk).slice(0, 300),
+        note: str(p.note).slice(0, 1500)
       };
       return (item.de || item.ru || item.uk) ? item : null;
     })

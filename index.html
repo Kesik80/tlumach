@@ -112,6 +112,12 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
 .xtr[disabled]{opacity:.4}
 .card{background:var(--card);border:1px solid var(--rule);border-radius:11px;padding:16px;margin-top:12px}
 .card h3{font-size:12px;font-weight:600;color:var(--soft);margin:0 0 8px}
+.opt{display:flex;align-items:center;gap:7px;margin-left:auto;color:var(--soft);font-size:13px;cursor:pointer}
+.opt input{width:17px;height:17px;accent-color:var(--der)}
+.expl{margin-top:12px}
+.expl dt{font-family:var(--serif);font-size:15px;margin-top:9px}
+.expl dd{margin:1px 0 0;color:var(--soft);font-size:14px}
+.lit{margin-top:12px;padding-left:11px;border-left:2px solid var(--rule);font-size:14px;color:var(--soft)}
 .event{border-top:1px solid var(--rule);padding-top:12px;margin-top:12px}
 .event:first-of-type{border-top:0;padding-top:0;margin-top:0}
 .event .when{font-family:var(--serif);font-size:20px}
@@ -223,6 +229,7 @@ details.panel[open]>summary::after{content:" ▴"}
 .editor-note{color:var(--soft);font-size:12px;margin:10px 0 0}
 .gloss-help{color:var(--soft);font-size:13px;margin:12px 0 8px}
 #glossText{min-height:96px;font-family:var(--sans);font-size:15px}
+#fldNote{min-height:66px;font-family:var(--sans);font-size:14px;padding:9px 11px}
 .gloss-actions{display:flex;gap:8px;align-items:center;margin-top:8px}
 .gloss-count{color:var(--soft);font-size:12px}
 #history{margin-top:30px}
@@ -252,6 +259,9 @@ details.panel[open]>summary::after{content:" ▴"}
 <div class="modes">
   <button class="mode" id="modeText" type="button" aria-pressed="true">Перевод</button>
   <button class="mode" id="modeDict" type="button" aria-pressed="false">Словарь</button>
+  <label class="opt" for="optExplain">
+    <input type="checkbox" id="optExplain"> объяснение
+  </label>
 </div>
 
 <textarea id="input" placeholder="Текст для перевода" autocapitalize="sentences" spellcheck="false"></textarea>
@@ -316,6 +326,10 @@ details.panel[open]>summary::after{content:" ▴"}
         <button class="fill" type="button" data-lang="uk" title="Заполнить остальные по этому полю">Дополнить</button>
       </div>
     </div>
+    <div class="field">
+      <label for="fldNote">Заметка</label>
+      <textarea id="fldNote" rows="3" placeholder="Разбор или своё пояснение — необязательно"></textarea>
+    </div>
     <div class="editor-actions">
       <button class="go" id="btnPhraseSave" type="button">Сохранить</button>
       <button class="ghost" id="btnPhraseCancel" type="button">Отмена</button>
@@ -356,6 +370,9 @@ details.panel[open]>summary::after{content:" ▴"}
   };
   var PLACEHOLDER = { text: 'Текст для перевода', dict: 'Слово или короткая фраза' };
   var CACHE_KEY = 'ueb_cache_v2';   // v1 содержал записи с перепутанными ключами
+  // Версия промптов и схем ответа. Поднимать при каждой правке api/translate.js,
+  // иначе старые ответы продолжают выдаваться из кэша и правка выглядит нерабочей.
+  var PROMPT_VERSION = 2;
   var HIST_KEY = 'ueb_history';
   var PREF_KEY = 'ueb_prefs';
   var GLOSS_KEY = 'ueb_glossary';
@@ -363,7 +380,7 @@ details.panel[open]>summary::after{content:" ▴"}
   var CACHE_MAX = 150;
   var HIST_MAX = 25;
 
-  var state = { from: 'de', to: 'ru', mode: 'text' };
+  var state = { from: 'de', to: 'ru', mode: 'text', explain: false };
   var busy = false;
   var lastOutput = { text: '', lang: 'ru' };
 
@@ -395,6 +412,7 @@ details.panel[open]>summary::after{content:" ▴"}
     fldDe: document.getElementById('fldDe'),
     fldRu: document.getElementById('fldRu'),
     fldUk: document.getElementById('fldUk'),
+    fldNote: document.getElementById('fldNote'),
     phraseSave: document.getElementById('btnPhraseSave'),
     phraseCancel: document.getElementById('btnPhraseCancel'),
     phraseStatus: document.getElementById('phraseStatus'),
@@ -403,6 +421,7 @@ details.panel[open]>summary::after{content:" ▴"}
     meet: document.getElementById('btnMeet'),
     tone: document.getElementById('btnTone'),
     simple: document.getElementById('btnSimple'),
+    explain: document.getElementById('optExplain'),
     photo: document.getElementById('btnPhoto'),
     file: document.getElementById('fileImg')
   };
@@ -420,7 +439,8 @@ details.panel[open]>summary::after{content:" ▴"}
   }
 
   function cacheKey(text, mode) {
-    return (mode || state.mode) + '|' + state.from + '|' + state.to + '|' + glossHash() + '|' + text;
+    return PROMPT_VERSION + '|' + (mode || state.mode) + '|' + state.from + '|' +
+      state.to + '|' + glossHash() + '|' + text;
   }
 
   // Короткий хэш глоссария: при его правке старые переводы должны
@@ -503,6 +523,7 @@ details.panel[open]>summary::after{content:" ▴"}
     if (LANGS.some(function (l) { return l.code === saved.from; })) state.from = saved.from;
     if (LANGS.some(function (l) { return l.code === saved.to; })) state.to = saved.to;
     if (saved.mode === 'dict' || saved.mode === 'text') state.mode = saved.mode;
+    state.explain = saved.explain === true;
     if (state.from === state.to) state.to = state.from === 'de' ? 'ru' : 'de';
   }
 
@@ -605,6 +626,7 @@ details.panel[open]>summary::after{content:" ▴"}
       cacheSet(source, { mode: 'text', translation: acc }, mode || 'text');
       addHistory(source);
       setStatus(streamTiming(sentAt, firstAt));
+      if (state.explain && acc.trim()) explainPhrase(source, acc, null);
     }
 
     // Старые движки без ReadableStream просто получат текст целиком.
@@ -904,6 +926,16 @@ details.panel[open]>summary::after{content:" ▴"}
     }
     bar.appendChild(speakButton('Озвучить перевод', copyText, copyLang));
 
+    if (copyText && sourceLang !== copyLang) {
+      var why = document.createElement('button');
+      why.type = 'button';
+      why.className = 'tool';
+      why.textContent = 'Объяснить';
+      var whySrc = speakSource || el.input.value.trim();
+      why.addEventListener('click', function () { explainPhrase(whySrc, copyText, why); });
+      bar.appendChild(why);
+    }
+
     var add = document.createElement('button');
     add.type = 'button';
     add.className = 'tool';
@@ -998,6 +1030,123 @@ details.panel[open]>summary::after{content:" ▴"}
       });
       el.histList.appendChild(b);
     });
+  }
+
+  // ---------- объяснение перевода ----------
+
+  // Отдельный запрос, а не часть перевода: перевод должен оставаться
+  // потоковым, а объяснение нужно не каждый раз.
+  function explainPhrase(source, translation, btn) {
+    if (!source || !translation) return;
+
+    var box = document.createElement('div');
+    box.className = 'card';
+    var head = document.createElement('h3');
+    head.textContent = 'Разбор';
+    box.appendChild(head);
+    var wait = document.createElement('div');
+    wait.className = 'note';
+    wait.textContent = 'Разбираю…';
+    box.appendChild(wait);
+    el.result.appendChild(box);
+
+    if (btn) btn.disabled = true;
+
+    fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'explain', from: state.from, to: state.to,
+        text: source, translation: translation, glossary: glossaryPairs()
+      })
+    })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (!res.ok) throw new Error(data.error || ('Ошибка ' + res.status));
+          if (!data.explain) throw new Error('Разбор не получился.');
+          return data.explain;
+        });
+      })
+      .then(function (ex) {
+        wait.remove();
+        renderExplain(box, ex, source, translation);
+      })
+      .catch(function (err) {
+        wait.textContent = err.message || 'Не удалось разобрать.';
+      })
+      .then(function () { if (btn) btn.disabled = false; });
+  }
+
+  function renderExplain(box, ex, source, translation) {
+    if (ex.gist) {
+      var gist = document.createElement('div');
+      gist.textContent = ex.gist;
+      gist.style.fontSize = '15px';
+      box.appendChild(gist);
+    }
+
+    var points = Array.isArray(ex.points) ? ex.points.filter(function (p) {
+      return p && p.label && p.text;
+    }) : [];
+    if (points.length) {
+      var dl = document.createElement('dl');
+      dl.className = 'expl';
+      points.forEach(function (p) {
+        var dt = document.createElement('dt');
+        dt.textContent = p.label;
+        var dd = document.createElement('dd');
+        dd.textContent = p.text;
+        dl.appendChild(dt);
+        dl.appendChild(dd);
+      });
+      box.appendChild(dl);
+    }
+
+    if (ex.literal) {
+      var lit = document.createElement('div');
+      lit.className = 'lit';
+      lit.textContent = 'Дословно: ' + ex.literal;
+      box.appendChild(lit);
+    }
+
+    var pitfalls = Array.isArray(ex.pitfalls) ? ex.pitfalls.filter(Boolean) : [];
+    if (pitfalls.length) {
+      var ul = document.createElement('ul');
+      ul.className = 'warn-list';
+      pitfalls.forEach(function (t) {
+        var li = document.createElement('li');
+        li.textContent = t;
+        ul.appendChild(li);
+      });
+      box.appendChild(ul);
+    }
+
+    // Разбор нигде не оседает сам по себе — только по этой кнопке,
+    // и то как заметка к фразе в разговорнике.
+    var bar = document.createElement('div');
+    bar.className = 'tools';
+    var save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'tool';
+    save.textContent = 'Сохранить с фразой';
+    save.addEventListener('click', function () {
+      phraseFromResult(source, translation, explainToText(ex));
+    });
+    bar.appendChild(save);
+    box.appendChild(bar);
+  }
+
+  function explainToText(ex) {
+    var parts = [];
+    if (ex.gist) parts.push(ex.gist);
+    (Array.isArray(ex.points) ? ex.points : []).forEach(function (p) {
+      if (p && p.label && p.text) parts.push(p.label + ': ' + p.text);
+    });
+    if (ex.literal) parts.push('Дословно: ' + ex.literal);
+    (Array.isArray(ex.pitfalls) ? ex.pitfalls : []).forEach(function (t) {
+      if (t) parts.push('Осторожно: ' + t);
+    });
+    return parts.join('\n');
   }
 
   // ---------- сохранение глагола в verb-de ----------
@@ -1495,7 +1644,7 @@ details.panel[open]>summary::after{content:" ▴"}
     var added = 0;
     remote.forEach(function (p) {
       if (!p || !p.id || seen[p.id]) return;
-      local.push({ id: p.id, de: p.de || '', ru: p.ru || '', uk: p.uk || '' });
+      local.push({ id: p.id, de: p.de || '', ru: p.ru || '', uk: p.uk || '', note: p.note || '' });
       added++;
     });
     if (added) saveMine(local);
@@ -1639,6 +1788,7 @@ details.panel[open]>summary::after{content:" ▴"}
     el.fldDe.value = item ? (item.de || '') : '';
     el.fldRu.value = item ? (item.ru || '') : '';
     el.fldUk.value = item ? (item.uk || '') : '';
+    el.fldNote.value = item ? (item.note || '') : '';
     el.phraseStatus.textContent = '';
     el.editor.classList.remove('hidden');
     el.phrasebook.open = true;
@@ -1655,7 +1805,8 @@ details.panel[open]>summary::after{content:" ▴"}
     var item = {
       de: el.fldDe.value.trim(),
       ru: el.fldRu.value.trim(),
-      uk: el.fldUk.value.trim()
+      uk: el.fldUk.value.trim(),
+      note: el.fldNote.value.trim()
     };
     if (!item.de && !item.ru && !item.uk) {
       el.phraseStatus.textContent = 'Пустая фраза';
@@ -1724,8 +1875,8 @@ details.panel[open]>summary::after{content:" ▴"}
 
   // Кнопка из результата перевода: исходник и перевод уже есть,
   // третий язык дозаполняется в редакторе.
-  function phraseFromResult(sourceText, resultText) {
-    var draft = { id: null, de: '', ru: '', uk: '' };
+  function phraseFromResult(sourceText, resultText, note) {
+    var draft = { id: null, de: '', ru: '', uk: '', note: note || '' };
     draft[state.from] = sourceText;
     draft[state.to] = resultText;
     openEditor(draft);
@@ -1851,6 +2002,12 @@ details.panel[open]>summary::after{content:" ▴"}
   el.meet.addEventListener('click', function () { translate('meet'); });
   el.tone.addEventListener('click', function () { translate('tone'); });
   el.simple.addEventListener('click', function () { translate('simple'); });
+
+  el.explain.checked = state.explain;
+  el.explain.addEventListener('change', function () {
+    state.explain = el.explain.checked;
+    savePrefs();
+  });
 
   el.phraseNew.addEventListener('click', function () { openEditor(null); });
   el.phraseSave.addEventListener('click', savePhrase);
