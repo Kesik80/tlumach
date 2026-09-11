@@ -241,7 +241,7 @@ details.panel[open]>summary::after{content:" ▴"}
 <body>
 
 <h1>Übersetzer</h1>
-<p class="tagline">Немецкий, русский, украинский — перевод и словарь <span style="opacity:.6">· сборка 11.09 12:00</span></p>
+<p class="tagline">Немецкий, русский, украинский — перевод и словарь <span style="opacity:.6">· сборка 11.09 12:10</span></p>
 
 <div class="bar">
   <div class="pills" id="fromPills" role="group" aria-label="Язык оригинала"></div>
@@ -525,8 +525,13 @@ details.panel[open]>summary::after{content:" ▴"}
 
   // Обычный перевод и словарь идут по вкладке, остальные режимы —
   // разовые действия поверх того же текста.
+  var MODES = ['text', 'dict', 'phrase', 'meet', 'tone', 'simple', 'photo', 'verb'];
+
   function translate(override) {
-    var mode = override || state.mode;
+    // Строго строка из списка: любой другой аргумент игнорируем,
+    // иначе случайно переданное событие подменяет режим.
+    var mode = (typeof override === 'string' && MODES.indexOf(override) >= 0)
+      ? override : state.mode;
     var text = el.input.value.trim();
     if (!text || busy) return;
     if (text.length > (LIMIT[mode] || 5000)) {
@@ -1758,7 +1763,9 @@ details.panel[open]>summary::after{content:" ▴"}
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); translate(); }
   });
 
-  el.go.addEventListener('click', translate);
+  // Без обёртки сюда прилетал объект события и попадал в параметр override,
+  // из-за чего кнопка всегда работала в режиме обычного перевода.
+  el.go.addEventListener('click', function () { translate(); });
   el.clear.addEventListener('click', function () {
     el.input.value = '';
     el.result.innerHTML = '';
