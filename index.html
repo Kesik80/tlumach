@@ -118,6 +118,15 @@ textarea:focus,button:focus-visible{outline:2px solid var(--der);outline-offset:
 .expl dt{font-family:var(--serif);font-size:15px;margin-top:9px}
 .expl dd{margin:1px 0 0;color:var(--soft);font-size:14px}
 .lit{margin-top:12px;padding-left:11px;border-left:2px solid var(--rule);font-size:14px;color:var(--soft)}
+.orig{font-family:var(--serif);font-size:17px;line-height:1.6;white-space:pre-wrap;margin:0}
+.orig mark{background:transparent;color:var(--die);border-bottom:2px solid var(--die);padding:0}
+.issue{border-top:1px solid var(--rule);padding-top:10px;margin-top:10px}
+.issue .pair{font-family:var(--serif);font-size:16px}
+.issue .pair s{color:var(--die);text-decoration-thickness:1px}
+.issue .pair b{color:var(--das);font-weight:400}
+.issue .why{color:var(--soft);font-size:14px;margin-top:2px}
+.issue .kind{display:inline-block;border:1px solid var(--rule);border-radius:6px;padding:1px 7px;font-size:11px;color:var(--soft);margin-left:6px}
+.verdict{margin-top:14px;padding-top:12px;border-top:1px solid var(--rule);font-size:15px}
 .event{border-top:1px solid var(--rule);padding-top:12px;margin-top:12px}
 .event:first-of-type{border-top:0;padding-top:0;margin-top:0}
 .event .when{font-family:var(--serif);font-size:20px}
@@ -283,6 +292,7 @@ details.panel[open]>summary::after{content:" ▴"}
   <button class="xtr" id="btnMeet" type="button">📅 Встреча</button>
   <button class="xtr" id="btnTone" type="button">✍️ Тон</button>
   <button class="xtr" id="btnSimple" type="button">📖 Проще</button>
+  <button class="xtr" id="btnCorrect" type="button">✔️ Проверить</button>
 </div>
 
 <div id="status"></div>
@@ -362,11 +372,11 @@ details.panel[open]>summary::after{content:" ▴"}
     { code: 'ru', label: 'RU', voice: 'ru-RU' },
     { code: 'uk', label: 'UA', voice: 'uk-UA' }
   ];
-  var LIMIT = { text: 5000, dict: 120, meet: 3000, tone: 2000, simple: 4000 };
+  var LIMIT = { text: 5000, dict: 120, meet: 3000, tone: 2000, simple: 4000, correct: 2000 };
   var WORKING = {
     text: 'Перевожу…', dict: 'Смотрю в словаре…',
     meet: 'Ищу договорённости…', tone: 'Проверяю тон…', simple: 'Упрощаю…',
-    photo: 'Читаю снимок…'
+    photo: 'Читаю снимок…', correct: 'Проверяю текст…'
   };
   var PLACEHOLDER = { text: 'Текст для перевода', dict: 'Слово или короткая фраза' };
   var CACHE_KEY = 'ueb_cache_v2';   // v1 содержал записи с перепутанными ключами
@@ -422,6 +432,7 @@ details.panel[open]>summary::after{content:" ▴"}
     tone: document.getElementById('btnTone'),
     simple: document.getElementById('btnSimple'),
     explain: document.getElementById('optExplain'),
+    correct: document.getElementById('btnCorrect'),
     photo: document.getElementById('btnPhoto'),
     file: document.getElementById('fileImg')
   };
@@ -539,6 +550,7 @@ details.panel[open]>summary::after{content:" ▴"}
     el.meet.disabled = idle;
     el.tone.disabled = idle;
     el.simple.disabled = idle;
+    el.correct.disabled = idle;
     el.photo.disabled = busy;  // снимку текст в поле не нужен
   }
 
@@ -701,6 +713,7 @@ details.panel[open]>summary::after{content:" ▴"}
     else if (data.tone) renderTone(data.tone);
     else if (data.simple) renderSimple(data.simple);
     else if (data.photo) renderPhoto(data.photo);
+    else if (data.correct) renderCorrect(data);
     else if (data.translation) renderText(data.translation);
     else setStatus('Пустой ответ от сервера.', true);
   }
@@ -1030,6 +1043,130 @@ details.panel[open]>summary::after{content:" ▴"}
       });
       el.histList.appendChild(b);
     });
+  }
+
+  // ---------- корректор ----------
+
+  var KIND_ORDER = ['грамматика', 'слово', 'порядок слов', 'опечатка', 'стиль'];
+
+  function renderCorrect(data) {
+    var ex = data.correct;
+    var box = document.createElement('div');
+    box.className = 'card';
+
+    // Подсветка строится по позициям от LanguageTool, а не по ответу модели:
+    // модель не умеет надёжно указывать смещения в тексте.
+    var marks = Array.isArray(data.lt) ? data.lt : [];
+    var head = document.createElement('h3');
+    head.textContent = marks.length
+      ? 'Твой текст · отмечено ' + marks.length
+      : (data.ltFailed ? 'Твой текст · проверка правилами недоступна' : 'Твой текст');
+    box.appendChild(head);
+    box.appendChild(highlight(el.input.value, marks));
+
+    if (ex.corrected) {
+      var h2 = document.createElement('h3');
+      h2.textContent = 'Исправленный вариант';
+      h2.style.marginTop = '16px';
+      box.appendChild(h2);
+
+      var corr = document.createElement('p');
+      corr.className = 'orig';
+      corr.textContent = ex.corrected;
+      box.appendChild(corr);
+      box.appendChild(toolbar(ex.corrected, state.from));
+    }
+
+    var issues = Array.isArray(ex.issues) ? ex.issues.filter(function (i) {
+      return i && i.wrong && i.why;
+    }) : [];
+    issues.sort(function (a, b) {
+      return KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind);
+    });
+
+    if (issues.length) {
+      var h3 = document.createElement('h3');
+      h3.textContent = 'Что не так';
+      h3.style.marginTop = '18px';
+      box.appendChild(h3);
+
+      issues.forEach(function (item) {
+        var wrap = document.createElement('div');
+        wrap.className = 'issue';
+
+        var pair = document.createElement('div');
+        pair.className = 'pair';
+        var was = document.createElement('s');
+        was.textContent = item.wrong;
+        pair.appendChild(was);
+        if (item.right) {
+          pair.appendChild(document.createTextNode(' → '));
+          var now = document.createElement('b');
+          now.textContent = item.right;
+          pair.appendChild(now);
+        }
+        if (item.kind) {
+          var kind = document.createElement('span');
+          kind.className = 'kind';
+          kind.textContent = item.kind;
+          pair.appendChild(kind);
+        }
+        wrap.appendChild(pair);
+
+        var why = document.createElement('div');
+        why.className = 'why';
+        why.textContent = item.why;
+        wrap.appendChild(why);
+
+        box.appendChild(wrap);
+      });
+    }
+
+    if (ex.natural) {
+      var alt = document.createElement('div');
+      alt.className = 'alt';
+      var t = document.createElement('h4');
+      t.textContent = 'Как сказал бы немец';
+      var p = document.createElement('p');
+      p.textContent = ex.natural;
+      alt.appendChild(t);
+      alt.appendChild(p);
+      alt.appendChild(toolbar(ex.natural, state.from));
+      box.appendChild(alt);
+    }
+
+    if (ex.verdict) {
+      var v = document.createElement('div');
+      v.className = 'verdict';
+      v.textContent = ex.verdict;
+      box.appendChild(v);
+    }
+
+    el.result.appendChild(box);
+  }
+
+  // Отрезки могут приходить в любом порядке и пересекаться —
+  // сортируем и пропускаем наложения, иначе разметка поедет.
+  function highlight(text, marks) {
+    var p = document.createElement('p');
+    p.className = 'orig';
+
+    var spans = marks
+      .filter(function (m) { return typeof m.offset === 'number' && m.length > 0; })
+      .sort(function (a, b) { return a.offset - b.offset; });
+
+    var pos = 0;
+    spans.forEach(function (m) {
+      if (m.offset < pos) return;
+      if (m.offset > pos) p.appendChild(document.createTextNode(text.slice(pos, m.offset)));
+      var mark = document.createElement('mark');
+      mark.textContent = text.substr(m.offset, m.length);
+      if (m.message) mark.title = m.message;
+      p.appendChild(mark);
+      pos = m.offset + m.length;
+    });
+    if (pos < text.length) p.appendChild(document.createTextNode(text.slice(pos)));
+    return p;
   }
 
   // ---------- объяснение перевода ----------
@@ -2002,6 +2139,7 @@ details.panel[open]>summary::after{content:" ▴"}
   el.meet.addEventListener('click', function () { translate('meet'); });
   el.tone.addEventListener('click', function () { translate('tone'); });
   el.simple.addEventListener('click', function () { translate('simple'); });
+  el.correct.addEventListener('click', function () { translate('correct'); });
 
   el.explain.checked = state.explain;
   el.explain.addEventListener('change', function () {
