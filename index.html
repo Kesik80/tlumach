@@ -293,6 +293,18 @@ details.panel[open]>summary::after{content:" ▴"}
   <button class="xtr" id="btnTone" type="button">✍️ Тон</button>
   <button class="xtr" id="btnSimple" type="button">📖 Проще</button>
   <button class="xtr" id="btnCorrect" type="button">✔️ Проверить</button>
+  <button class="xtr" id="btnReply" type="button">💬 Ответить</button>
+</div>
+
+<div class="editor hidden" id="replyBox">
+  <div class="field">
+    <label for="fldIntent">Что ответить — своими словами, по-русски</label>
+    <textarea id="fldIntent" rows="2" placeholder="не смогу, буду только к 17, пусть забирает Дима"></textarea>
+  </div>
+  <div class="editor-actions">
+    <button class="go" id="btnReplyGo" type="button">Составить ответ</button>
+    <button class="ghost" id="btnReplyCancel" type="button">Отмена</button>
+  </div>
 </div>
 
 <div id="status"></div>
@@ -382,17 +394,17 @@ details.panel[open]>summary::after{content:" ▴"}
     { code: 'ru', label: 'RU', voice: 'ru-RU' },
     { code: 'uk', label: 'UA', voice: 'uk-UA' }
   ];
-  var LIMIT = { text: 5000, dict: 120, meet: 3000, tone: 2000, simple: 4000, correct: 2000 };
+  var LIMIT = { text: 5000, dict: 120, meet: 3000, tone: 2000, simple: 4000, correct: 2000, reply: 3000 };
   var WORKING = {
     text: 'Перевожу…', dict: 'Смотрю в словаре…',
     meet: 'Ищу договорённости…', tone: 'Проверяю тон…', simple: 'Упрощаю…',
-    photo: 'Читаю снимок…', correct: 'Проверяю текст…'
+    photo: 'Читаю снимок…', correct: 'Проверяю текст…', reply: 'Составляю ответ…'
   };
   var PLACEHOLDER = { text: 'Текст для перевода', dict: 'Слово или короткая фраза' };
   var CACHE_KEY = 'ueb_cache_v2';   // v1 содержал записи с перепутанными ключами
   // Версия промптов и схем ответа. Поднимать при каждой правке api/translate.js,
   // иначе старые ответы продолжают выдаваться из кэша и правка выглядит нерабочей.
-  var PROMPT_VERSION = 4;
+  var PROMPT_VERSION = 5;
   var HIST_KEY = 'ueb_history';
   var PREF_KEY = 'ueb_prefs';
   var GLOSS_KEY = 'ueb_glossary';
@@ -402,6 +414,7 @@ details.panel[open]>summary::after{content:" ▴"}
   var HIST_MAX = 25;
 
   var state = { from: 'de', to: 'ru', mode: 'text', explain: false };
+  var active = { from: 'de', to: 'ru' };   // пара последнего запроса
   var busy = false;
   var lastOutput = { text: '', lang: 'ru' };
 
@@ -447,6 +460,11 @@ details.panel[open]>summary::after{content:" ▴"}
     simple: document.getElementById('btnSimple'),
     explain: document.getElementById('optExplain'),
     correct: document.getElementById('btnCorrect'),
+    reply: document.getElementById('btnReply'),
+    replyBox: document.getElementById('replyBox'),
+    intent: document.getElementById('fldIntent'),
+    replyGo: document.getElementById('btnReplyGo'),
+    replyCancel: document.getElementById('btnReplyCancel'),
     photo: document.getElementById('btnPhoto'),
     file: document.getElementById('fileImg')
   };
@@ -464,8 +482,8 @@ details.panel[open]>summary::after{content:" ▴"}
   }
 
   function cacheKey(text, mode) {
-    return PROMPT_VERSION + '|' + (mode || state.mode) + '|' + state.from + '|' +
-      state.to + '|' + glossHash() + '|' + text;
+    return PROMPT_VERSION + '|' + (mode || state.mode) + '|' + active.from + '|' +
+      active.to + '|' + glossHash() + '|' + text;
   }
 
   // Короткий хэш глоссария: при его правке старые переводы должны
@@ -497,7 +515,10 @@ details.panel[open]>summary::after{content:" ▴"}
 
   function buildPills(box, side) {
     box.innerHTML = '';
-    LANGS.forEach(function (lang) {
+    var list = side === 'from'
+      ? [{ code: 'auto', label: 'АВТО' }].concat(LANGS)
+      : LANGS;
+    list.forEach(function (lang) {
       var b = document.createElement('button');
       b.type = 'button';
       b.className = 'pill';
@@ -506,6 +527,47 @@ details.panel[open]>summary::after{content:" ▴"}
       b.addEventListener('click', function () { pickLang(side, lang.code); });
       box.appendChild(b);
     });
+  }
+
+  // Определяем на клиенте: мгновенно, бесплатно и работает офлайн.
+  // Кириллица против латиницы отделяет немецкий, дальше — по буквам и словам,
+  // которых нет во втором языке.
+  var UA_LETTERS = /[іїєґІЇЄҐ]/;
+  var RU_LETTERS = /[ыэъёЫЭЪЁ]/;
+  var CYRILLIC = /[А-Яа-яІіЇїЄєҐґ]/;
+
+  // Списками слов, а не регуляркой с \\b: в JavaScript граница слова
+  // определена только для латиницы и на кириллице молча не срабатывает.
+  var UA_WORDS = ['що','це','дякую','ласка','треба','зараз','добре','привіт',
+                  'також','бо','зможу','маємо','котрій','де','коли'];
+  var RU_WORDS = ['что','это','спасибо','пожалуйста','надо','сейчас','хорошо',
+                  'привет','тоже','потому','смогу','имеем','сколько','где','когда'];
+
+  function words(text) {
+    return text.toLowerCase().split(/[^a-zà-ÿа-яёіїєґ]+/i).filter(Boolean);
+  }
+
+  function countHits(list, tokens) {
+    var n = 0;
+    tokens.forEach(function (w) { if (list.indexOf(w) !== -1) n++; });
+    return n;
+  }
+
+  function detectLang(text) {
+    if (!CYRILLIC.test(text)) return 'de';
+
+    var ua = UA_LETTERS.test(text);
+    var ru = RU_LETTERS.test(text);
+    if (ua && !ru) return 'uk';
+    if (ru && !ua) return 'ru';
+
+    var tokens = words(text);
+    var uaHits = countHits(UA_WORDS, tokens);
+    var ruHits = countHits(RU_WORDS, tokens);
+    if (uaHits > ruHits) return 'uk';
+    if (ruHits > uaHits) return 'ru';
+
+    return 'ru';   // при полной неоднозначности берём частотный вариант
   }
 
   function pickLang(side, code) {
@@ -545,11 +607,15 @@ details.panel[open]>summary::after{content:" ▴"}
   function loadPrefs() {
     var saved = read(PREF_KEY, null);
     if (!saved) return;
-    if (LANGS.some(function (l) { return l.code === saved.from; })) state.from = saved.from;
+    if (saved.from === 'auto' || LANGS.some(function (l) { return l.code === saved.from; })) {
+      state.from = saved.from;
+    }
     if (LANGS.some(function (l) { return l.code === saved.to; })) state.to = saved.to;
     if (saved.mode === 'dict' || saved.mode === 'text') state.mode = saved.mode;
     state.explain = saved.explain === true;
-    if (state.from === state.to) state.to = state.from === 'de' ? 'ru' : 'de';
+    if (state.from !== 'auto' && state.from === state.to) {
+      state.to = state.from === 'de' ? 'ru' : 'de';
+    }
   }
 
   // ---------- ввод ----------
@@ -565,6 +631,7 @@ details.panel[open]>summary::after{content:" ▴"}
     el.tone.disabled = idle;
     el.simple.disabled = idle;
     el.correct.disabled = idle;
+    el.reply.disabled = idle;
     el.photo.disabled = busy;  // снимку текст в поле не нужен
   }
 
@@ -579,7 +646,16 @@ details.panel[open]>summary::after{content:" ▴"}
   // разовые действия поверх того же текста.
   // Список должен совпадать с MODES на сервере. Забудешь дописать новый режим —
   // translate() молча откатится к текущей вкладке, как было с 'correct'.
-  var MODES = ['text', 'dict', 'phrase', 'meet', 'tone', 'simple', 'photo', 'verb', 'noun', 'explain', 'correct'];
+  var MODES = ['text', 'dict', 'phrase', 'meet', 'tone', 'simple', 'photo', 'verb', 'noun', 'explain', 'correct', 'reply'];
+
+  // Возвращает конкретную пару языков: 'auto' раскрывается по тексту,
+  // а язык назначения при совпадении сдвигается, иначе перевод бессмыслен.
+  function resolvePair(text) {
+    var from = state.from === 'auto' ? detectLang(text) : state.from;
+    var to = state.to;
+    if (from === to) to = (from === 'de') ? 'ru' : 'de';
+    return { from: from, to: to, detected: state.from === 'auto' ? from : null };
+  }
 
   function translate(override) {
     // Строго строка из списка: любой другой аргумент игнорируем,
@@ -601,6 +677,10 @@ details.panel[open]>summary::after{content:" ▴"}
       return;
     }
 
+    var pair = resolvePair(text);
+    active.from = pair.from;
+    active.to = pair.to;
+
     var cached = cacheGet(text, mode);
     if (cached) {
       show(cached.payload);
@@ -619,7 +699,8 @@ details.panel[open]>summary::after{content:" ▴"}
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        text: text, from: state.from, to: state.to, mode: mode,
+        text: text, from: active.from, to: active.to, mode: mode,
+        intent: mode === 'reply' ? el.intent.value.trim() : undefined,
         glossary: glossaryPairs(), context: userContext(), now: localNow()
       })
     })
@@ -637,7 +718,7 @@ details.panel[open]>summary::after{content:" ▴"}
           cacheSet(text, data, mode);
           addHistory(text);
           show(data);
-          setStatus(timingLine(data, sentAt));
+          setStatus(detectedNote() + timingLine(data, sentAt));
         });
       })
       .catch(function (err) {
@@ -661,7 +742,7 @@ details.panel[open]>summary::after{content:" ▴"}
       // и текстовый перевод оседал под словарным ключом.
       cacheSet(source, { mode: 'text', translation: acc }, mode || 'text');
       addHistory(source);
-      setStatus(streamTiming(sentAt, firstAt));
+      setStatus(detectedNote() + streamTiming(sentAt, firstAt));
       if (state.explain && acc.trim()) explainPhrase(source, acc, null);
     }
 
@@ -698,6 +779,13 @@ details.panel[open]>summary::after{content:" ▴"}
     return firstAt
       ? 'Первые слова через ' + ((firstAt - sentAt) / 1000).toFixed(1) + ' с · всего ' + total + ' с'
       : 'Всего ' + total + ' с';
+  }
+
+  var LANG_TITLE = { de: 'немецкий', ru: 'русский', uk: 'украинский' };
+
+  function detectedNote() {
+    if (state.from !== 'auto') return '';
+    return 'Язык: ' + (LANG_TITLE[active.from] || active.from) + ' · ';
   }
 
   function timingLine(data, sentAt) {
@@ -738,6 +826,7 @@ details.panel[open]>summary::after{content:" ▴"}
     else if (data.simple) renderSimple(data.simple);
     else if (data.photo) renderPhoto(data.photo);
     else if (data.correct) renderCorrect(data);
+    else if (data.reply) renderReply(data.reply);
     else if (data.translation) renderText(data.translation);
     else setStatus('Пустой ответ от сервера.', true);
   }
@@ -762,9 +851,9 @@ details.panel[open]>summary::after{content:" ▴"}
   }
 
   function finishTextBox(handle, text) {
-    lastOutput = { text: text, lang: state.to };
+    lastOutput = { text: text, lang: active.to };
     decorateWords(handle.p, text);
-    handle.box.appendChild(toolbar(text, state.to));
+    handle.box.appendChild(toolbar(text, active.to));
   }
 
   // Разбираем готовый текст на слова, чтобы по каждому можно было ткнуть
@@ -933,14 +1022,14 @@ details.panel[open]>summary::after{content:" ▴"}
     }
 
     var headwordText = entry.headword || el.input.value.trim();
-    lastOutput = { text: spoken.join('; '), lang: state.to };
-    box.appendChild(toolbar(spoken.join('; '), state.to, headwordText, state.from));
+    lastOutput = { text: spoken.join('; '), lang: active.to };
+    box.appendChild(toolbar(spoken.join('; '), active.to, headwordText, active.from));
 
     // woerterbuch.json в verb-de — словарь глаголов, поэтому кнопка
     // показывается только для немецкого глагола.
-    if (state.from === 'de' && /глагол/i.test(entry.pos || '')) {
+    if (active.from === 'de' && /глагол/i.test(entry.pos || '')) {
       box.appendChild(wordSaveRow(headwordText, 'verb'));
-    } else if (state.from === 'de' && /существительное/i.test(entry.pos || '')) {
+    } else if (active.from === 'de' && /существительное/i.test(entry.pos || '')) {
       box.appendChild(wordSaveRow(headwordText, 'noun'));
     }
 
@@ -1034,9 +1123,9 @@ details.panel[open]>summary::after{content:" ▴"}
   function addHistory(text) {
     var items = read(HIST_KEY, []);
     items = items.filter(function (i) {
-      return !(i.text === text && i.from === state.from && i.to === state.to && i.mode === state.mode);
+      return !(i.text === text && i.from === active.from && i.to === active.to && i.mode === state.mode);
     });
-    items.unshift({ text: text, from: state.from, to: state.to, mode: state.mode });
+    items.unshift({ text: text, from: active.from, to: active.to, mode: state.mode });
     write(HIST_KEY, items.slice(0, HIST_MAX));
     renderHistory();
   }
@@ -1067,6 +1156,70 @@ details.panel[open]>summary::after{content:" ▴"}
       });
       el.histList.appendChild(b);
     });
+  }
+
+  // ---------- ответ на сообщение ----------
+
+  function renderReply(r) {
+    var box = document.createElement('div');
+    box.className = 'card';
+
+    var h = document.createElement('h3');
+    h.textContent = 'Ответ';
+    var reg = String(r.register || '').toLowerCase();
+    if (r.register) {
+      var badge = document.createElement('span');
+      badge.className = 'badge' + (reg === 'du' ? ' du' : reg === 'sie' ? ' sie' : '');
+      badge.textContent = r.register;
+      h.appendChild(badge);
+    }
+    box.appendChild(h);
+
+    var main = document.createElement('p');
+    main.className = 'orig';
+    main.textContent = r.de || '';
+    box.appendChild(main);
+    box.appendChild(toolbar(r.de || '', 'de'));
+
+    if (r.alt) {
+      var alt = document.createElement('div');
+      alt.className = 'alt';
+      var t = document.createElement('h4');
+      t.textContent = 'Другой вариант';
+      var p = document.createElement('p');
+      p.textContent = r.alt;
+      alt.appendChild(t);
+      alt.appendChild(p);
+      alt.appendChild(toolbar(r.alt, 'de'));
+      box.appendChild(alt);
+    }
+
+    if (r.note) {
+      var note = document.createElement('div');
+      note.className = 'verdict';
+      note.textContent = r.note;
+      box.appendChild(note);
+    }
+
+    // То, о чём спросили, а ты не ответил — самое ценное в этом режиме:
+    // именно здесь теряются договорённости.
+    var missing = Array.isArray(r.missing) ? r.missing.filter(Boolean) : [];
+    if (missing.length) {
+      var head = document.createElement('h4');
+      head.textContent = 'Осталось без ответа';
+      head.style.marginTop = '14px';
+      box.appendChild(head);
+      var ul = document.createElement('ul');
+      ul.className = 'warn-list';
+      missing.forEach(function (m) {
+        var li = document.createElement('li');
+        li.textContent = m;
+        ul.appendChild(li);
+      });
+      box.appendChild(ul);
+    }
+
+    el.result.appendChild(box);
   }
 
   // ---------- корректор ----------
@@ -1106,7 +1259,7 @@ details.panel[open]>summary::after{content:" ▴"}
       corr.className = 'orig';
       corr.textContent = ex.corrected;
       box.appendChild(corr);
-      box.appendChild(toolbar(ex.corrected, state.from));
+      box.appendChild(toolbar(ex.corrected, active.from));
     }
 
     // Подстраховка: запись, где «было» совпадает с «стало», — это не ошибка,
@@ -1165,7 +1318,7 @@ details.panel[open]>summary::after{content:" ▴"}
       p.textContent = ex.natural;
       alt.appendChild(t);
       alt.appendChild(p);
-      alt.appendChild(toolbar(ex.natural, state.from));
+      alt.appendChild(toolbar(ex.natural, active.from));
       box.appendChild(alt);
     }
 
@@ -1227,7 +1380,7 @@ details.panel[open]>summary::after{content:" ▴"}
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        mode: 'explain', from: state.from, to: state.to,
+        mode: 'explain', from: active.from, to: active.to,
         text: source, translation: translation,
         glossary: glossaryPairs(), context: userContext()
       })
@@ -1453,6 +1606,11 @@ details.panel[open]>summary::after{content:" ▴"}
   function translatePhoto(file) {
     if (!file || busy) return;
 
+    // На снимке текста ещё нет, определять нечего: при АВТО считаем немецким —
+    // фотографируют обычно письма и вывески.
+    active.from = state.from === 'auto' ? 'de' : state.from;
+    active.to = active.from === state.to ? (active.from === 'de' ? 'ru' : 'de') : state.to;
+
     busy = true;
     updateCount();
     setStatus('Готовлю снимок…');
@@ -1466,7 +1624,7 @@ details.panel[open]>summary::after{content:" ▴"}
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            mode: 'photo', from: state.from, to: state.to,
+            mode: 'photo', from: active.from, to: active.to,
             image: image, glossary: glossaryPairs(), context: userContext()
           })
         });
@@ -1505,7 +1663,7 @@ details.panel[open]>summary::after{content:" ▴"}
     tr.style.margin = '0';
     tr.style.whiteSpace = 'pre-wrap';
     box.appendChild(tr);
-    box.appendChild(toolbar(data.translation || '', state.to));
+    box.appendChild(toolbar(data.translation || '', active.to));
 
     if (data.source) {
       var alt = document.createElement('div');
@@ -1874,7 +2032,7 @@ details.panel[open]>summary::after{content:" ▴"}
   // Что показать крупно, что мелко: крупно — язык оригинала,
   // мелко — язык, на который переводим. Если поля нет, берём что есть.
   function phrasePick(item) {
-    var order = [state.from, 'de', 'ru', 'uk'];
+    var order = [state.from === 'auto' ? 'de' : state.from, 'de', 'ru', 'uk'];
     for (var i = 0; i < order.length; i++) {
       if (item[order[i]]) return { text: item[order[i]], lang: order[i] };
     }
@@ -2067,8 +2225,8 @@ details.panel[open]>summary::after{content:" ▴"}
   // третий язык дозаполняется в редакторе.
   function phraseFromResult(sourceText, resultText, note) {
     var draft = { id: null, de: '', ru: '', uk: '', note: note || '' };
-    draft[state.from] = sourceText;
-    draft[state.to] = resultText;
+    draft[active.from] = sourceText;
+    draft[active.to] = resultText;
     openEditor(draft);
     editing = null;
   }
@@ -2101,7 +2259,8 @@ details.panel[open]>summary::after{content:" ▴"}
   function toggleMic() {
     if (recog) { recog.stop(); return; }
 
-    var lang = LANGS.filter(function (l) { return l.code === state.from; })[0];
+    var code = state.from === 'auto' ? 'de' : state.from;
+    var lang = LANGS.filter(function (l) { return l.code === code; })[0];
     recog = new Recognition();
     recog.lang = lang ? lang.voice : 'de-DE';
     recog.interimResults = true;
@@ -2148,6 +2307,7 @@ details.panel[open]>summary::after{content:" ▴"}
   renderHistory();
 
   el.swap.addEventListener('click', function () {
+    if (state.from === 'auto') { setStatus('При АВТО менять языки местами нечего.'); return; }
     var a = state.from;
     state.from = state.to;
     state.to = a;
@@ -2193,6 +2353,17 @@ details.panel[open]>summary::after{content:" ▴"}
   el.tone.addEventListener('click', function () { translate('tone'); });
   el.simple.addEventListener('click', function () { translate('simple'); });
   el.correct.addEventListener('click', function () { translate('correct'); });
+
+  el.reply.addEventListener('click', function () {
+    if (!el.input.value.trim()) { setStatus('Сначала вставь полученное сообщение.', true); return; }
+    el.replyBox.classList.remove('hidden');
+    el.intent.focus();
+  });
+  el.replyCancel.addEventListener('click', function () { el.replyBox.classList.add('hidden'); });
+  el.replyGo.addEventListener('click', function () {
+    el.replyBox.classList.add('hidden');
+    translate('reply');
+  });
 
   el.explain.checked = state.explain;
   el.explain.addEventListener('change', function () {
