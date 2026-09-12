@@ -563,13 +563,23 @@ details.panel[open]>summary::after{content:" ▴"}
 
   // Обычный перевод и словарь идут по вкладке, остальные режимы —
   // разовые действия поверх того же текста.
-  var MODES = ['text', 'dict', 'phrase', 'meet', 'tone', 'simple', 'photo', 'verb'];
+  // Список должен совпадать с MODES на сервере. Забудешь дописать новый режим —
+  // translate() молча откатится к текущей вкладке, как было с 'correct'.
+  var MODES = ['text', 'dict', 'phrase', 'meet', 'tone', 'simple', 'photo', 'verb', 'noun', 'explain', 'correct'];
 
   function translate(override) {
     // Строго строка из списка: любой другой аргумент игнорируем,
     // иначе случайно переданное событие подменяет режим.
-    var mode = (typeof override === 'string' && MODES.indexOf(override) >= 0)
-      ? override : state.mode;
+    var mode = state.mode;
+    if (typeof override === 'string') {
+      if (MODES.indexOf(override) === -1) {
+        // Не глотаем ошибку: неизвестный режим — это опечатка в коде,
+        // а не повод втихую сделать обычный перевод.
+        setStatus('Неизвестный режим: ' + override, true);
+        return;
+      }
+      mode = override;
+    }
     var text = el.input.value.trim();
     if (!text || busy) return;
     if (text.length > (LIMIT[mode] || 5000)) {
