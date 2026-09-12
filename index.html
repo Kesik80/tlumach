@@ -237,7 +237,7 @@ details.panel[open]>summary::after{content:" ▴"}
 .editor-actions{display:flex;gap:8px;align-items:center;margin-top:12px}
 .editor-note{color:var(--soft);font-size:12px;margin:10px 0 0}
 .gloss-help{color:var(--soft);font-size:13px;margin:12px 0 8px}
-#glossText{min-height:96px;font-family:var(--sans);font-size:15px}
+#glossText,#ctxText{min-height:96px;font-family:var(--sans);font-size:15px}
 #fldNote{min-height:66px;font-family:var(--sans);font-size:14px;padding:9px 11px}
 .gloss-actions{display:flex;gap:8px;align-items:center;margin-top:8px}
 .gloss-count{color:var(--soft);font-size:12px}
@@ -351,6 +351,16 @@ details.panel[open]>summary::after{content:" ▴"}
   <div id="phraseList"></div>
 </details>
 
+<details class="panel" id="context">
+  <summary>Контекст — кто ты и о чём пишешь</summary>
+  <p class="gloss-help">Пара строк о себе: профессия, где работаешь, о чём обычно переписка. Это уходит в каждый запрос и помогает не принимать рабочие термины за ошибки.</p>
+  <textarea id="ctxText" placeholder="Работаю Gleisbaumaschinist — машинист путевой машины (Stopfmaschine). «Maschine» в переписке значит именно её. Переписка со сменой: кто кого забирает, во сколько выезд."></textarea>
+  <div class="gloss-actions">
+    <button class="ghost" id="btnCtxSave" type="button">Сохранить</button>
+    <span class="gloss-count" id="ctxCount"></span>
+  </div>
+</details>
+
 <details class="panel" id="glossary">
   <summary>Глоссарий — свои варианты перевода</summary>
   <p class="gloss-help">По строке на слово, в формате <b>Maschine = машина</b>. Эти соответствия подставляются в каждый запрос, чтобы перевод был единообразным. Годится для рабочих терминов, имён коллег и названий улиц.</p>
@@ -382,10 +392,11 @@ details.panel[open]>summary::after{content:" ▴"}
   var CACHE_KEY = 'ueb_cache_v2';   // v1 содержал записи с перепутанными ключами
   // Версия промптов и схем ответа. Поднимать при каждой правке api/translate.js,
   // иначе старые ответы продолжают выдаваться из кэша и правка выглядит нерабочей.
-  var PROMPT_VERSION = 2;
+  var PROMPT_VERSION = 3;
   var HIST_KEY = 'ueb_history';
   var PREF_KEY = 'ueb_prefs';
   var GLOSS_KEY = 'ueb_glossary';
+  var CTX_KEY = 'ueb_context';
   var MINE_KEY = 'ueb_myphrases';
   var CACHE_MAX = 150;
   var HIST_MAX = 25;
@@ -415,6 +426,9 @@ details.panel[open]>summary::after{content:" ▴"}
     glossText: document.getElementById('glossText'),
     glossSave: document.getElementById('btnGlossSave'),
     glossCount: document.getElementById('glossCount'),
+    ctxText: document.getElementById('ctxText'),
+    ctxSave: document.getElementById('btnCtxSave'),
+    ctxCount: document.getElementById('ctxCount'),
     phrasebook: document.getElementById('phrasebook'),
     phraseNew: document.getElementById('btnPhraseNew'),
     phraseEditToggle: document.getElementById('btnPhraseEdit'),
@@ -457,7 +471,7 @@ details.panel[open]>summary::after{content:" ▴"}
   // Короткий хэш глоссария: при его правке старые переводы должны
   // перестать доставаться из кэша, иначе новые термины не подхватятся.
   function glossHash() {
-    var raw = read(GLOSS_KEY, '');
+    var raw = read(GLOSS_KEY, '') + '\u0000' + read(CTX_KEY, '');
     var h = 0;
     for (var i = 0; i < raw.length; i++) {
       h = ((h << 5) - h + raw.charCodeAt(i)) | 0;
@@ -606,7 +620,7 @@ details.panel[open]>summary::after{content:" ▴"}
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         text: text, from: state.from, to: state.to, mode: mode,
-        glossary: glossaryPairs(), now: localNow()
+        glossary: glossaryPairs(), context: userContext(), now: localNow()
       })
     })
       .then(function (res) {
@@ -1204,7 +1218,8 @@ details.panel[open]>summary::after{content:" ▴"}
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         mode: 'explain', from: state.from, to: state.to,
-        text: source, translation: translation, glossary: glossaryPairs()
+        text: source, translation: translation,
+        glossary: glossaryPairs(), context: userContext()
       })
     })
       .then(function (res) {
@@ -1442,7 +1457,7 @@ details.panel[open]>summary::after{content:" ▴"}
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             mode: 'photo', from: state.from, to: state.to,
-            image: image, glossary: glossaryPairs()
+            image: image, glossary: glossaryPairs(), context: userContext()
           })
         });
       })
@@ -1732,6 +1747,24 @@ details.panel[open]>summary::after{content:" ▴"}
   }
 
   // ---------- глоссарий ----------
+
+  function userContext() {
+    var v = read(CTX_KEY, '');
+    return typeof v === 'string' ? v.slice(0, 600) : '';
+  }
+
+  function renderCtxCount() {
+    var n = userContext().length;
+    el.ctxCount.textContent = n ? n + ' из 600' : 'пусто';
+  }
+
+  function saveContext() {
+    write(CTX_KEY, el.ctxText.value.slice(0, 600));
+    renderCtxCount();
+    var old = el.ctxSave.textContent;
+    el.ctxSave.textContent = 'Сохранено';
+    setTimeout(function () { el.ctxSave.textContent = old; }, 1400);
+  }
 
   function glossaryPairs() {
     var raw = read(GLOSS_KEY, '');
@@ -2182,6 +2215,10 @@ details.panel[open]>summary::after{content:" ▴"}
 
   el.phrasePush.addEventListener('click', pushPhrases);
   mergeRemotePhrases();
+
+  el.ctxSave.addEventListener('click', saveContext);
+  el.ctxText.value = userContext();
+  renderCtxCount();
 
   el.glossText.value = read(GLOSS_KEY, '');
   renderGlossCount();
