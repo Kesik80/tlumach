@@ -392,7 +392,7 @@ details.panel[open]>summary::after{content:" ▴"}
   var CACHE_KEY = 'ueb_cache_v2';   // v1 содержал записи с перепутанными ключами
   // Версия промптов и схем ответа. Поднимать при каждой правке api/translate.js,
   // иначе старые ответы продолжают выдаваться из кэша и правка выглядит нерабочей.
-  var PROMPT_VERSION = 3;
+  var PROMPT_VERSION = 4;
   var HIST_KEY = 'ueb_history';
   var PREF_KEY = 'ueb_prefs';
   var GLOSS_KEY = 'ueb_glossary';
@@ -1080,11 +1080,19 @@ details.panel[open]>summary::after{content:" ▴"}
 
     // Подсветка строится по позициям от LanguageTool, а не по ответу модели:
     // модель не умеет надёжно указывать смещения в тексте.
-    var marks = Array.isArray(data.lt) ? data.lt : [];
+    // Находки, признанные моделью ложными, не подсвечиваем: имена коллег,
+    // подчёркнутые красным, только мешают увидеть настоящие ошибки.
+    var dropped = Array.isArray(ex.falsePositives) ? ex.falsePositives : [];
+    var marks = (Array.isArray(data.lt) ? data.lt : []).filter(function (m, i) {
+      return dropped.indexOf(i + 1) === -1;
+    });
     var head = document.createElement('h3');
+    var skipped = dropped.length ? ', отсеяно ' + dropped.length : '';
     head.textContent = marks.length
-      ? 'Твой текст · отмечено ' + marks.length
-      : (data.ltFailed ? 'Твой текст · проверка правилами недоступна' : 'Твой текст');
+      ? 'Твой текст · отмечено ' + marks.length + skipped
+      : (data.ltFailed
+        ? 'Твой текст · проверка правилами недоступна'
+        : 'Твой текст · без замечаний' + skipped);
     box.appendChild(head);
     box.appendChild(highlight(el.input.value, marks));
 
@@ -1101,8 +1109,10 @@ details.panel[open]>summary::after{content:" ▴"}
       box.appendChild(toolbar(ex.corrected, state.from));
     }
 
+    // Подстраховка: запись, где «было» совпадает с «стало», — это не ошибка,
+    // а шум, даже если модель всё же её вернула.
     var issues = Array.isArray(ex.issues) ? ex.issues.filter(function (i) {
-      return i && i.wrong && i.why;
+      return i && i.wrong && i.why && i.right && i.wrong.trim() !== i.right.trim();
     }) : [];
     issues.sort(function (a, b) {
       return KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind);

@@ -477,9 +477,10 @@ const CORRECT_SCHEMA = {
       }
     },
     natural: { type: 'STRING' },
-    verdict: { type: 'STRING' }
+    verdict: { type: 'STRING' },
+    falsePositives: { type: 'ARRAY', items: { type: 'INTEGER' } }
   },
-  required: ['corrected', 'issues', 'verdict']
+  required: ['corrected', 'issues', 'verdict', 'falsePositives']
 };
 
 const NOUN_SCHEMA = {
@@ -652,8 +653,9 @@ function correctPrompt(from, matches) {
     `- corrected: the text with mistakes fixed. Change only what is wrong. Keep the user's wording, tone and line breaks everywhere else. This is a correction, not a rewrite.`,
     `- issues: one entry per real problem. wrong = the fragment as the user wrote it, right = how it should be, why = short explanation in Russian, kind = exactly one of "грамматика", "слово", "порядок слов", "стиль", "опечатка".`,
     `  Include both the checker's findings that are genuine and anything it missed: calques from Russian, an unnatural verb, a wrong case after a preposition, a missing article.`,
-    `  If a flagged spot is actually fine, leave it out entirely rather than inventing a problem.`,
-    `  Leave specialised vocabulary alone. If a word looks odd to you but could be a term from the user's trade, a machine, a place or a proper name, it stays as written — say so in "why" as a question rather than rewriting it. Correcting a professional's own terminology is worse than missing a mistake.`,
+    `  Never output an entry where "wrong" and "right" are the same text. If there is nothing to change, there is no issue.`,
+    `  Leave specialised vocabulary alone: terms from the user's trade, machine names, place names, personal names — including Slavic ones — stay exactly as written. Correcting a professional's own terminology is worse than missing a mistake.`,
+    `- falsePositives: the numbers of the checker's findings above that are not real problems — proper names it does not know, trade terms, deliberate informal spelling. Empty list if all of them are genuine. Do not describe them anywhere else; this list is how they get dismissed.`,
     `- natural: how a German would more likely phrase the whole thing, but only if that differs noticeably from "corrected". Omit when the corrected version already sounds natural.`,
     `- verdict: one sentence in Russian on the overall level of the text — what is already good and what to work on.`,
     ``,
