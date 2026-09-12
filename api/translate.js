@@ -19,8 +19,8 @@ const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const MODEL_TEXT = process.env.MODEL_TEXT || 'gemini-3.5-flash-lite';
 const MODEL_DICT = process.env.MODEL_DICT || 'gemini-3.5-flash';
 
-const LANG_NAME = { de: 'German', ru: 'Russian', uk: 'Ukrainian' };
-const LT_LANG = { de: 'de-DE', ru: 'ru-RU', uk: 'uk-UA' };
+const LANG_NAME = { de: 'German', ru: 'Russian', uk: 'Ukrainian', en: 'English' };
+const LT_LANG = { de: 'de-DE', ru: 'ru-RU', uk: 'uk-UA', en: 'en-US' };
 const LT_URL = 'https://api.languagetool.org/v2/check';
 
 const MAX_LEN = { text: 5000, dict: 120, phrase: 300, meet: 3000, tone: 2000, simple: 4000, photo: 0, verb: 60, noun: 60, explain: 2000, correct: 2000, reply: 3000 };

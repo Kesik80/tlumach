@@ -532,6 +532,14 @@ details.panel[open]>summary::after{content:" ▴"}
   // Определяем на клиенте: мгновенно, бесплатно и работает офлайн.
   // Кириллица против латиницы отделяет немецкий, дальше — по буквам и словам,
   // которых нет во втором языке.
+  var DE_LETTERS = /[äöüßÄÖÜ]/;
+  // Английский определяется, но в кнопках его нет: на него не переводят,
+  // с него только читают.
+  var DE_WORDS = ['der','die','das','und','ist','sind','nicht','ich','wir','mit',
+                  'bitte','danke','auch','für','uhr','wenn','aber','noch','schon','kann'];
+  var EN_WORDS = ['the','and','you','is','are','have','this','with','please',
+                  'thanks','will','your','can','from','about','would','need','today'];
+
   var UA_LETTERS = /[іїєґІЇЄҐ]/;
   var RU_LETTERS = /[ыэъёЫЭЪЁ]/;
   var CYRILLIC = /[А-Яа-яІіЇїЄєҐґ]/;
@@ -554,7 +562,7 @@ details.panel[open]>summary::after{content:" ▴"}
   }
 
   function detectLang(text) {
-    if (!CYRILLIC.test(text)) return 'de';
+    if (!CYRILLIC.test(text)) return detectLatin(text);
 
     var ua = UA_LETTERS.test(text);
     var ru = RU_LETTERS.test(text);
@@ -568,6 +576,18 @@ details.panel[open]>summary::after{content:" ▴"}
     if (ruHits > uaHits) return 'ru';
 
     return 'ru';   // при полной неоднозначности берём частотный вариант
+  }
+
+  function detectLatin(text) {
+    if (DE_LETTERS.test(text)) return 'de';
+
+    var tokens = words(text);
+    var de = countHits(DE_WORDS, tokens);
+    var en = countHits(EN_WORDS, tokens);
+    if (en > de) return 'en';
+    if (de > en) return 'de';
+
+    return 'de';   // живёшь в Германии — при равенстве вероятнее немецкий
   }
 
   function pickLang(side, code) {
@@ -654,6 +674,7 @@ details.panel[open]>summary::after{content:" ▴"}
     var from = state.from === 'auto' ? detectLang(text) : state.from;
     var to = state.to;
     if (from === to) to = (from === 'de') ? 'ru' : 'de';
+    if (from === 'en' && to === 'en') to = 'ru';
     return { from: from, to: to, detected: state.from === 'auto' ? from : null };
   }
 
@@ -781,7 +802,7 @@ details.panel[open]>summary::after{content:" ▴"}
       : 'Всего ' + total + ' с';
   }
 
-  var LANG_TITLE = { de: 'немецкий', ru: 'русский', uk: 'украинский' };
+  var LANG_TITLE = { de: 'немецкий', ru: 'русский', uk: 'украинский', en: 'английский' };
 
   function detectedNote() {
     if (state.from !== 'auto') return '';
@@ -1082,9 +1103,11 @@ details.panel[open]>summary::after{content:" ▴"}
     return b;
   }
 
+  var VOICES = { de: 'de-DE', ru: 'ru-RU', uk: 'uk-UA', en: 'en-US' };
+
   function speak(text, langCode) {
     if (!('speechSynthesis' in window) || !text) return;
-    var lang = LANGS.filter(function (l) { return l.code === langCode; })[0];
+    var lang = { voice: VOICES[langCode] };
     window.speechSynthesis.cancel();
     var u = new SpeechSynthesisUtterance(text);
     u.lang = lang ? lang.voice : 'de-DE';
