@@ -54,6 +54,8 @@ module.exports = async function handler(req, res) {
 
   try {
     if (kind === 'phrases') return await savePhrases(res, body, target);
+    // Пакет: десятки слов — это один коммит на файл, а не коммит на слово.
+    if (Array.isArray(body.entries)) return await saveBatch(res, body);
     return await saveWord(res, body, target, kind);
   } catch (err) {
     console.error('vocab handler failed', err);
@@ -101,6 +103,60 @@ async function saveWord(res, body, target, kind) {
   if (!saved.ok) return fail(res, 502, saved.message);
 
   return res.status(200).json({ saved: true, word: key, total: Object.keys(sorted).length });
+}
+
+// ---------- пакетное добавление ----------
+
+async function saveBatch(res, body) {
+  const overwrite = body.overwrite === true;
+  const groups = { verb: [], noun: [] };
+  const rejected = [];
+
+  body.entries.slice(0, 60).forEach(item => {
+    if (!item || (item.kind !== 'verb' && item.kind !== 'noun')) return;
+    const clean = item.kind === 'noun' ? validateNoun(item.entry) : validateVerb(item.entry);
+    if (clean) groups[item.kind].push(clean);
+    else rejected.push((item.entry && (item.entry.wort || item.entry.infinitiv)) || '?');
+  });
+
+  if (!groups.verb.length && !groups.noun.length) {
+    return fail(res, 400, 'Ни одной пригодной карточки в пакете.');
+  }
+
+  const saved = [];
+  const skipped = [];
+  const totals = {};
+
+  for (const kind of ['verb', 'noun']) {
+    if (!groups[kind].length) continue;
+    const target = TARGETS[kind];
+
+    const current = await loadJson(target, kind === 'noun');
+    if (!current) return fail(res, 502, `Не удалось прочитать ${target.path}.`);
+    const dict = current.data;
+
+    groups[kind].forEach(entry => {
+      const key = entry.key;
+      delete entry.key;
+      if (dict[key] && !overwrite) { skipped.push(key); return; }
+      entry.addedAt = new Date().toISOString();
+      dict[key] = entry;
+      saved.push(key);
+    });
+
+    const sorted = {};
+    Object.keys(dict).sort((a, b) => a.localeCompare(b, 'de')).forEach(k => { sorted[k] = dict[k]; });
+    totals[kind] = Object.keys(sorted).length;
+
+    const added = groups[kind].length - skipped.length;
+    if (added > 0) {
+      const out = await putFile(target, JSON.stringify(sorted, null, 2) + '\n', current.sha,
+        `Пакет: ${kind === 'noun' ? 'существительные' : 'глаголы'}, добавлено ${added} (Тлумач)`);
+      if (!out.ok) return fail(res, 502, out.message);
+    }
+  }
+
+  return res.status(200).json({ saved, skipped, rejected, totals });
 }
 
 // ---------- разговорник ----------

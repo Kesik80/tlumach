@@ -237,12 +237,17 @@ details.panel[open]>summary::after{content:" ▴"}
 .editor-actions{display:flex;gap:8px;align-items:center;margin-top:12px}
 .editor-note{color:var(--soft);font-size:12px;margin:10px 0 0}
 .gloss-help{color:var(--soft);font-size:13px;margin:12px 0 8px}
-#glossText,#ctxText{min-height:96px;font-family:var(--sans);font-size:15px}
+#glossText,#ctxText,#bulkText{min-height:96px;font-family:var(--sans);font-size:15px}
+.brow{display:flex;align-items:center;gap:9px;border-top:1px solid var(--rule);padding:9px 0}
+.brow input{width:19px;height:19px;flex:none;accent-color:var(--der)}
+.brow .w2{font-family:var(--serif);font-size:16px;flex:1;min-width:0}
+.brow .w2 small{display:block;color:var(--soft);font-size:13px;font-family:var(--sans)}
+.brow .tag{font-size:11px;color:var(--soft);border:1px solid var(--rule);border-radius:6px;padding:1px 7px;flex:none}
+.brow.off{opacity:.45}
 #fldNote{min-height:66px;font-family:var(--sans);font-size:14px;padding:9px 11px}
 .gloss-actions{display:flex;gap:8px;align-items:center;margin-top:8px}
 .gloss-count{color:var(--soft);font-size:12px}
-#history{margin-top:30px}
-#history h2{font-size:13px;font-weight:600;color:var(--soft);margin:0 0 8px}
+#histList{margin-top:6px}
 .hist-item{
   display:block;width:100%;text-align:left;background:transparent;border:0;
   border-top:1px solid var(--rule);color:var(--ink);font:inherit;font-size:15px;
@@ -310,11 +315,11 @@ details.panel[open]>summary::after{content:" ▴"}
 <div id="status"></div>
 <div id="result"></div>
 
-<div id="history" class="hidden">
-  <h2>Недавнее</h2>
+<details class="panel hidden" id="history">
+  <summary>Недавнее</summary>
   <div id="histList"></div>
   <button class="hist-clear" id="btnHistClear" type="button">Очистить историю</button>
-</div>
+</details>
 
 <details class="panel" id="phrasebook">
   <summary>Разговорник — работает без интернета</summary>
@@ -361,6 +366,17 @@ details.panel[open]>summary::after{content:" ▴"}
   </div>
 
   <div id="phraseList"></div>
+</details>
+
+<details class="panel" id="bulk">
+  <summary>Пополнить словарь — списком</summary>
+  <p class="gloss-help">По слову в строке, до 40 штук. Форма любая: <b>holte ab</b>, <b>maschine</b>, <b>Schichten</b> — приведу к словарной. Глаголы уйдут в verb-de, существительные в substantive.json, одним коммитом.</p>
+  <textarea id="bulkText" placeholder="abholen&#10;Schicht&#10;Baustelle&#10;melden&#10;Gleis"></textarea>
+  <div class="gloss-actions">
+    <button class="ghost" id="btnBulkScan" type="button">Разобрать</button>
+    <span class="gloss-count" id="bulkNote"></span>
+  </div>
+  <div id="bulkList"></div>
 </details>
 
 <details class="panel" id="context">
@@ -442,6 +458,10 @@ details.panel[open]>summary::after{content:" ▴"}
     ctxText: document.getElementById('ctxText'),
     ctxSave: document.getElementById('btnCtxSave'),
     ctxCount: document.getElementById('ctxCount'),
+    bulkText: document.getElementById('bulkText'),
+    bulkScan: document.getElementById('btnBulkScan'),
+    bulkNote: document.getElementById('bulkNote'),
+    bulkList: document.getElementById('bulkList'),
     phrasebook: document.getElementById('phrasebook'),
     phraseNew: document.getElementById('btnPhraseNew'),
     phraseEditToggle: document.getElementById('btnPhraseEdit'),
@@ -666,7 +686,7 @@ details.panel[open]>summary::after{content:" ▴"}
   // разовые действия поверх того же текста.
   // Список должен совпадать с MODES на сервере. Забудешь дописать новый режим —
   // translate() молча откатится к текущей вкладке, как было с 'correct'.
-  var MODES = ['text', 'dict', 'phrase', 'meet', 'tone', 'simple', 'photo', 'verb', 'noun', 'explain', 'correct', 'reply'];
+  var MODES = ['text', 'dict', 'phrase', 'meet', 'tone', 'simple', 'photo', 'verb', 'noun', 'explain', 'correct', 'reply', 'bulk'];
 
   // Возвращает конкретную пару языков: 'auto' раскрывается по тексту,
   // а язык назначения при совпадении сдвигается, иначе перевод бессмыслен.
@@ -1167,6 +1187,7 @@ details.panel[open]>summary::after{content:" ▴"}
         (item.mode === 'dict' ? ' · словарь' : '');
       b.appendChild(tag);
       b.addEventListener('click', function () {
+        el.history.open = false;
         state.from = item.from;
         state.to = item.to;
         syncLangs();
@@ -1495,6 +1516,161 @@ details.panel[open]>summary::after{content:" ▴"}
       if (t) parts.push('Осторожно: ' + t);
     });
     return parts.join('\n');
+  }
+
+  // ---------- пополнение словаря списком ----------
+
+  var bulkItems = [];
+
+  function bulkScan() {
+    var lines = el.bulkText.value.split('\n')
+      .map(function (l) { return l.trim(); })
+      .filter(Boolean)
+      .slice(0, 40);
+
+    if (!lines.length) { el.bulkNote.textContent = 'Список пуст'; return; }
+
+    el.bulkScan.disabled = true;
+    el.bulkNote.textContent = 'Разбираю ' + lines.length + '…';
+    el.bulkList.innerHTML = '';
+
+    fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'bulk', from: 'de', to: 'ru',
+        text: lines.join('\n'), context: userContext()
+      })
+    })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (!res.ok) throw new Error(data.error || ('Ошибка ' + res.status));
+          if (!data.bulk || !Array.isArray(data.bulk.items)) throw new Error('Список не разобрался.');
+          return data.bulk.items;
+        });
+      })
+      .then(function (items) {
+        bulkItems = items.filter(function (i) { return i && i.lemma; });
+        renderBulk();
+      })
+      .catch(function (err) { el.bulkNote.textContent = err.message || 'Не получилось.'; })
+      .then(function () { el.bulkScan.disabled = false; });
+  }
+
+  var KIND_TAG = { verb: 'глагол', noun: 'существительное', other: 'не сохраняется' };
+
+  function renderBulk() {
+    el.bulkList.innerHTML = '';
+    var savable = 0;
+
+    bulkItems.forEach(function (item, idx) {
+      var known = item.kind === 'verb' || item.kind === 'noun';
+      if (known) savable++;
+
+      var row = document.createElement('div');
+      row.className = 'brow' + (known ? '' : ' off');
+
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = known;
+      cb.disabled = !known;
+      cb.dataset.idx = String(idx);
+      row.appendChild(cb);
+
+      var w = document.createElement('div');
+      w.className = 'w2';
+      w.textContent = item.lemma;
+      if (item.hint) {
+        var small = document.createElement('small');
+        small.textContent = item.hint;
+        w.appendChild(small);
+      }
+      row.appendChild(w);
+
+      var tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = KIND_TAG[item.kind] || item.kind;
+      row.appendChild(tag);
+
+      el.bulkList.appendChild(row);
+    });
+
+    if (savable) {
+      var go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'go';
+      go.style.marginTop = '12px';
+      go.textContent = 'Собрать карточки и сохранить';
+      go.addEventListener('click', function () { bulkSave(go); });
+      el.bulkList.appendChild(go);
+    }
+    el.bulkNote.textContent = 'Разобрано ' + bulkItems.length + ', к сохранению ' + savable;
+  }
+
+  // Карточки строятся по одной: полная таблица спряжений на двадцать слов
+  // в один ответ не влезет. Два запроса параллельно — компромисс между
+  // скоростью и лимитом бесплатного тарифа.
+  function bulkSave(btn) {
+    var chosen = [];
+    Array.prototype.forEach.call(el.bulkList.querySelectorAll('input:checked'), function (cb) {
+      chosen.push(bulkItems[Number(cb.dataset.idx)]);
+    });
+    if (!chosen.length) return;
+
+    btn.disabled = true;
+    var done = 0;
+    var cards = [];
+    var failed = [];
+
+    function step() {
+      var item = chosen.shift();
+      if (!item) return Promise.resolve();
+      return fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: item.kind, from: 'de', to: 'ru', text: item.lemma })
+      })
+        .then(function (res) { return res.json().catch(function () { return {}; }); })
+        .then(function (data) {
+          var card = data[item.kind];
+          if (card && (card.infinitiv || card.wort)) cards.push({ kind: item.kind, entry: card });
+          else failed.push(item.lemma);
+        })
+        .catch(function () { failed.push(item.lemma); })
+        .then(function () {
+          done++;
+          el.bulkNote.textContent = 'Карточки: ' + done + ' из ' + (done + chosen.length);
+          return step();
+        });
+    }
+
+    Promise.all([step(), step()])
+      .then(function () {
+        if (!cards.length) throw new Error('Ни одной карточки собрать не удалось.');
+        el.bulkNote.textContent = 'Записываю ' + cards.length + ' в репозиторий…';
+        return fetch('/api/vocab', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ entries: cards })
+        }).then(function (res) {
+          return res.json().catch(function () { return {}; }).then(function (data) {
+            if (!res.ok) throw new Error(data.error || ('Ошибка ' + res.status));
+            return data;
+          });
+        });
+      })
+      .then(function (data) {
+        var parts = ['Сохранено ' + data.saved.length];
+        if (data.skipped.length) parts.push('уже было ' + data.skipped.length);
+        if (failed.length) parts.push('не вышло ' + failed.length + ': ' + failed.join(', '));
+        el.bulkNote.textContent = parts.join(' · ');
+        el.bulkList.innerHTML = '';
+        bulkItems = [];
+      })
+      .catch(function (err) {
+        el.bulkNote.textContent = err.message || 'Не получилось сохранить.';
+        btn.disabled = false;
+      });
   }
 
   // ---------- сохранение глагола в verb-de ----------
@@ -2420,6 +2596,7 @@ details.panel[open]>summary::after{content:" ▴"}
   el.phrasePush.addEventListener('click', pushPhrases);
   mergeRemotePhrases();
 
+  el.bulkScan.addEventListener('click', bulkScan);
   el.ctxSave.addEventListener('click', saveContext);
   el.ctxText.value = userContext();
   renderCtxCount();

@@ -23,8 +23,8 @@ const LANG_NAME = { de: 'German', ru: 'Russian', uk: 'Ukrainian', en: 'English' 
 const LT_LANG = { de: 'de-DE', ru: 'ru-RU', uk: 'uk-UA', en: 'en-US' };
 const LT_URL = 'https://api.languagetool.org/v2/check';
 
-const MAX_LEN = { text: 5000, dict: 120, phrase: 300, meet: 3000, tone: 2000, simple: 4000, photo: 0, verb: 60, noun: 60, explain: 2000, correct: 2000, reply: 3000 };
-const MAX_TOKENS = { text: 3000, dict: 3000, phrase: 1200, meet: 2500, tone: 2500, simple: 3000, photo: 3000, verb: 2500, noun: 2000, explain: 2500, correct: 3000, reply: 2500 };
+const MAX_LEN = { text: 5000, dict: 120, phrase: 300, meet: 3000, tone: 2000, simple: 4000, photo: 0, verb: 60, noun: 60, explain: 2000, correct: 2000, reply: 3000, bulk: 1200 };
+const MAX_TOKENS = { text: 3000, dict: 3000, phrase: 1200, meet: 2500, tone: 2500, simple: 3000, photo: 3000, verb: 2500, noun: 2000, explain: 2500, correct: 3000, reply: 2500, bulk: 4000 };
 
 // Картинка приходит base64. Клиент её ужимает, но подстраховаться надо:
 // у Vercel есть предел на размер тела запроса.
@@ -36,7 +36,7 @@ const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
 // Допустимые значения: MINIMAL, LOW, MEDIUM, HIGH.
 // meet считает даты («завтра в 20:30» → конкретное число), ему нужно чуть
 // больше, чем остальным. Всё прочее думать не должно — это только задержка.
-const THINKING = { text: 'MINIMAL', dict: 'MINIMAL', phrase: 'MINIMAL', meet: 'LOW', tone: 'LOW', simple: 'MINIMAL', photo: 'LOW', verb: 'LOW', noun: 'LOW', explain: 'LOW', correct: 'LOW', reply: 'LOW' };
+const THINKING = { text: 'MINIMAL', dict: 'MINIMAL', phrase: 'MINIMAL', meet: 'LOW', tone: 'LOW', simple: 'MINIMAL', photo: 'LOW', verb: 'LOW', noun: 'LOW', explain: 'LOW', correct: 'LOW', reply: 'LOW', bulk: 'MINIMAL' };
 
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 20;
@@ -63,10 +63,10 @@ module.exports = async function handler(req, res) {
   }
   if (!body || typeof body !== 'object') return fail(res, 400, 'Пустое тело запроса.');
 
-  const MODES = ['text', 'dict', 'phrase', 'meet', 'tone', 'simple', 'photo', 'verb', 'noun', 'explain', 'correct', 'reply'];
+  const MODES = ['text', 'dict', 'phrase', 'meet', 'tone', 'simple', 'photo', 'verb', 'noun', 'explain', 'correct', 'reply', 'bulk'];
   const mode = MODES.indexOf(body.mode) >= 0 ? body.mode : 'text';
   // Режимы, где направление перевода задано самим режимом.
-  const SELF_DIRECTED = ['phrase', 'meet', 'tone', 'simple', 'verb', 'noun', 'correct', 'reply'];
+  const SELF_DIRECTED = ['phrase', 'meet', 'tone', 'simple', 'verb', 'noun', 'correct', 'reply', 'bulk'];
   const NEEDS_PAIR = mode === 'explain';   // объяснению нужны оба языка
   const NEEDS_TARGET = mode === 'photo';  // фото переводим в выбранный язык
   const from = String(body.from || '').toLowerCase();
@@ -136,6 +136,7 @@ module.exports = async function handler(req, res) {
     mode === 'explain' ? explainPrompt(from, to, body.translation) :
     mode === 'correct' ? correctPrompt(from, ltMatches) :
     mode === 'reply' ? replyPrompt(from, body.intent) :
+    mode === 'bulk' ? bulkPrompt() :
     textPrompt(from, to);
 
   const payload = {
@@ -300,7 +301,7 @@ function sendStructured(res, data, model, startedAt, mode, extra) {
   if (!parsed) {
     return res.status(200).json({ mode: 'text', model, translation: raw, degraded: true });
   }
-  const KEY = { phrase: 'phrase', meet: 'meet', tone: 'tone', simple: 'simple', photo: 'photo', verb: 'verb', noun: 'noun', explain: 'explain', correct: 'correct', reply: 'reply', dict: 'entry' };
+  const KEY = { phrase: 'phrase', meet: 'meet', tone: 'tone', simple: 'simple', photo: 'photo', verb: 'verb', noun: 'noun', explain: 'explain', correct: 'correct', reply: 'reply', bulk: 'bulk', dict: 'entry' };
   const out = { mode, model, ms: Date.now() - startedAt, usage: data.usageMetadata };
   out[KEY[mode] || 'entry'] = parsed;
   if (extra && extra.lt) { out.lt = extra.lt; out.ltFailed = extra.ltFailed; }
@@ -460,6 +461,26 @@ const EXPLAIN_SCHEMA = {
   required: ['gist', 'points']
 };
 
+const BULK_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    items: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          input: { type: 'STRING' },
+          lemma: { type: 'STRING' },
+          kind: { type: 'STRING' },
+          hint: { type: 'STRING' }
+        },
+        required: ['input', 'lemma', 'kind', 'hint']
+      }
+    }
+  },
+  required: ['items']
+};
+
 const REPLY_SCHEMA = {
   type: 'OBJECT',
   properties: {
@@ -546,6 +567,7 @@ const SCHEMAS = {
   noun: NOUN_SCHEMA,
   correct: CORRECT_SCHEMA,
   reply: REPLY_SCHEMA,
+  bulk: BULK_SCHEMA,
   explain: EXPLAIN_SCHEMA,
   phrase: PHRASE_SCHEMA,
   meet: MEET_SCHEMA,
@@ -646,6 +668,21 @@ async function runLanguageTool(text, from) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function bulkPrompt() {
+  return [
+    `The user pastes a list of German words, one per line, to add to their dictionary.`,
+    `For every line return one item, in the same order. Never merge or drop lines.`,
+    ``,
+    `- input: the line exactly as the user wrote it.`,
+    `- lemma: the dictionary form. Verbs: the infinitive. Nouns: nominative singular, capitalised. Anything else: as written.`,
+    `- kind: exactly "verb", "noun" or "other". Use "other" for adjectives, adverbs, phrases and anything you cannot identify.`,
+    `- hint: the Russian meaning, two or three words, no explanation.`,
+    ``,
+    `A line may be inflected, misspelled or written in lower case — still give the proper dictionary form.`,
+    `If a line is not a German word at all, return it with kind "other" and an empty hint.`
+  ].join('\n');
 }
 
 function replyPrompt(from, intent) {

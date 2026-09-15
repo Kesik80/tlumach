@@ -4,12 +4,12 @@
   "description": "Gemini Translate",
   "id": "/",
   "start_url": "/",
-  "display": "fullscreen",
+  "display": "standalone",
   "display_override": [
     "fullscreen",
     "standalone"
   ],
-  "theme_color": "#0a0a0f",
+  "theme_color": "#eef1f5",
   "background_color": "#0a0a0f",
   "icons": [
     {
