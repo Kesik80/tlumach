@@ -9,7 +9,7 @@
  * echoTargetLanguage=false: речь уже на целевом языке модель не повторяет,
  * поэтому перевод, который играет из динамика, не уходит по кругу.
  *
- * Подключается в index.html после основного скрипта: <script src="live.js?v=1">.
+ * Подключается в index.html после основного скрипта: <script src="live.js?v=2">.
  * При правке этого файла поднимать ?v= — service worker отдаёт .js из кэша.
  */
 (function () {
@@ -377,14 +377,16 @@
 
       ws.onopen = function () {
         ws.send(JSON.stringify({
+          // Настройка всё равно берётся из токена целиком; дублируем её
+          // на случай, если сервер начнёт сверять одно с другим.
           setup: {
             model: 'models/' + d.model,
             generationConfig: {
               responseModalities: ['AUDIO'],
-              inputAudioTranscription: {},
-              outputAudioTranscription: {},
               translationConfig: { targetLanguageCode: target, echoTargetLanguage: false }
-            }
+            },
+            inputAudioTranscription: {},
+            outputAudioTranscription: {}
           }
         }));
       };

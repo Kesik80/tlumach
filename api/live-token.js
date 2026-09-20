@@ -42,24 +42,30 @@ module.exports = async function handler(req, res) {
   const to = String((body && body.to) || '').toLowerCase();
   if (TARGETS.indexOf(to) === -1) return fail(res, 400, 'Неизвестный язык перевода.');
 
+  // REST-формат AuthToken: настройка сессии лежит в bidiGenerateContentSetup
+  // (liveConnectConstraints — это имя только в SDK, REST его не знает).
+  // fieldMask не задан → сессия берёт настройку целиком отсюда, а то, что
+  // пришлёт браузер, игнорируется. Язык перевода подменить нельзя.
+  // uses не передаём: по умолчанию токен и так одноразовый, а в справочнике
+  // uses и bidiGenerateContentSetup описаны как взаимоисключающие.
   const now = Date.now();
   const payload = {
-    uses: 1,
     expireTime: new Date(now + SESSION_MIN * 60_000).toISOString(),
     newSessionExpireTime: new Date(now + START_WINDOW_S * 1000).toISOString(),
-    liveConnectConstraints: {
+    bidiGenerateContentSetup: {
       model: `models/${MODEL_LIVE}`,
-      config: {
+      generationConfig: {
         responseModalities: ['AUDIO'],
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
         translationConfig: {
           targetLanguageCode: to,
           // Речь уже на целевом языке не повторять. Благодаря этому
           // перевод, который телефон сам же проигрывает, не уходит по кругу.
           echoTargetLanguage: false
         }
-      }
+      },
+      // Субтитры — поля самой настройки, не generationConfig.
+      inputAudioTranscription: {},
+      outputAudioTranscription: {}
     }
   };
 
@@ -79,13 +85,16 @@ module.exports = async function handler(req, res) {
 
     if (!upstream.ok) {
       const raw = await upstream.text().catch(() => '');
-      console.error('auth_tokens error', upstream.status, raw.slice(0, 400));
+      console.error('auth_tokens error', upstream.status, raw.slice(0, 600));
+      // Текст ошибки Google отдаём клиенту: с телефона логи Vercel не посмотреть,
+      // а ключа в этом тексте нет.
+      const why = googleMessage(raw);
       if (upstream.status === 429) return fail(res, 429, 'Лимит бесплатного тарифа исчерпан. Попробуй позже.');
-      if (upstream.status === 404) return fail(res, 502, `Модель ${MODEL_LIVE} недоступна для этого ключа.`);
+      if (upstream.status === 404) return fail(res, 502, `Модель ${MODEL_LIVE} недоступна для этого ключа.` + why);
       if (upstream.status === 400 || upstream.status === 403) {
-        return fail(res, 502, 'Google отклонил запрос токена. Проверь GEMINI_API_KEY и MODEL_LIVE.');
+        return fail(res, 502, `Google отклонил запрос токена (${upstream.status}).` + why);
       }
-      return fail(res, 502, `Сервис токенов вернул ошибку (${upstream.status}).`);
+      return fail(res, 502, `Сервис токенов вернул ошибку (${upstream.status}).` + why);
     }
 
     const data = await upstream.json().catch(() => null);
@@ -100,6 +109,15 @@ module.exports = async function handler(req, res) {
     clearTimeout(timer);
   }
 };
+
+function googleMessage(raw) {
+  try {
+    const msg = JSON.parse(raw).error.message;
+    return msg ? ' Google: ' + String(msg).slice(0, 300) : '';
+  } catch {
+    return '';
+  }
+}
 
 // ---- те же проверки, что в translate.js ----
 
