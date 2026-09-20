@@ -290,7 +290,23 @@ html.live-open,html.live-open body{overflow:hidden}
 .live-side[aria-pressed="true"]{background:var(--die);border-color:var(--die);color:#fff;animation:livePulse 1.6s ease-in-out infinite}
 .live-side[aria-pressed="true"] small{color:#fff;opacity:.85}
 @keyframes livePulse{50%{box-shadow:0 0 0 7px rgba(208,52,44,.18)}}
-.live-foot{display:flex;justify-content:center;gap:22px;margin-top:8px}
+.live-foot{display:flex;justify-content:center;flex-wrap:wrap;gap:6px 18px;margin-top:8px}
+.live-btns.hidden{display:none}
+.live .bar+.bar{margin-top:-2px}
+.live-turn{cursor:pointer}
+.live .hist-item{padding:10px 0}
+.live-big{
+  position:fixed;inset:0;z-index:60;background:var(--paper);
+  display:flex;flex-direction:column;
+  padding:calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+}
+.live-big.hidden{display:none}
+.lb-card{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;justify-content:center;transition:transform .25s}
+.lb-card.flip{transform:rotate(180deg)}
+.lb-text{font-family:var(--serif);line-height:1.3;color:var(--ink);word-break:break-word}
+.lb-src{color:var(--soft);font-size:16px;margin-top:16px}
+.lb-btns{display:flex;gap:10px;margin-top:12px}
+.lb-btns button{flex:1;padding:14px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -2674,7 +2690,7 @@ html.live-open,html.live-open body{overflow:hidden}
   intakeShare();
 })();
 </script>
-<script src="live.js?v=2"></script>
+<script src="live.js?v=3"></script>
 <script src="/pwa.js"></script>
 <script src="console.js"></script>
 </body>

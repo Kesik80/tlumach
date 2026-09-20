@@ -24,7 +24,8 @@ const SESSION_MIN = 20;      // сколько живёт уже открыто�
 const START_WINDOW_S = 60;   // за сколько секунд надо успеть подключиться
 
 const RATE_WINDOW_MS = 60_000;
-const RATE_MAX = 12;
+// Обе стороны держат по сессии, плюс переподключения после фона и goAway.
+const RATE_MAX = 30;
 const hits = new Map();
 
 module.exports = async function handler(req, res) {
