@@ -295,6 +295,23 @@ html.live-open,html.live-open body{overflow:hidden}
 .live .bar+.bar{margin-top:-2px}
 .live-turn{cursor:pointer}
 .live .hist-item{padding:10px 0}
+.live-face{display:none;flex:1;min-height:0;flex-direction:column;gap:8px;padding:4px 0}
+.live.face-mode .live-log,.live.face-mode .live-status,.live.face-mode .live-btns,.live.face-mode .live-foot{display:none}
+.live.face-mode .live-face{display:flex}
+.face-pane{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;border:1px solid var(--rule);border-radius:16px;background:var(--card);padding:10px 12px}
+.face-pane.them{transform:rotate(180deg)}
+.face-btn{
+  flex:none;border:1px solid var(--rule);background:var(--paper);color:var(--ink);
+  border-radius:12px;font:inherit;font-size:16px;padding:12px 8px;cursor:pointer;touch-action:manipulation;
+}
+.face-btn[aria-pressed="true"]{background:var(--die);border-color:var(--die);color:#fff;animation:livePulse 1.6s ease-in-out infinite}
+.face-text{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;justify-content:flex-end;gap:7px}
+.face-line{font-family:var(--serif);font-size:18px;line-height:1.35;color:var(--soft)}
+.face-line.last{font-size:25px;color:var(--ink)}
+.face-line.own{font-family:var(--sans);font-size:14px;line-height:1.3}
+.face-line.own.last{font-size:15px;color:var(--soft)}
+.face-status{flex:none;color:var(--die);font-size:13px}
+.face-status:empty{display:none}
 .live-big{
   position:fixed;inset:0;z-index:60;background:var(--paper);
   display:flex;flex-direction:column;
@@ -2690,7 +2707,7 @@ html.live-open,html.live-open body{overflow:hidden}
   intakeShare();
 })();
 </script>
-<script src="live.js?v=3"></script>
+<script src="live.js?v=4"></script>
 <script src="/pwa.js"></script>
 <script src="console.js"></script>
 </body>

@@ -18,7 +18,7 @@
  *            Пока играет перевод, микрофон никуда не отправляется — иначе
  *            озвучка ушла бы на перевод обратно и зациклилась.
  *
- * Подключается в index.html после основного скрипта: <script src="live.js?v=3">.
+ * Подключается в index.html после основного скрипта: <script src="live.js?v=4">.
  * При правке этого файла поднимать ?v= — service worker отдаёт .js из кэша.
  */
 (function () {
@@ -37,11 +37,27 @@
   var PAUSE_MS = 2500;       // тишина дольше — значит, следующая реплика
   var ECHO_TAIL = 0.3;       // авто: столько секунд после конца озвучки микрофон ещё молчит
   var MAX_FAILS = 3;
+  var FLUSH_MS = 60;         // как часто склеивать пришедший звук
+  var JITTER = 0.18;         // запас перед началом озвучки, секунды
+  var GUESS_MS = 700;        // сколько ждать расшифровку, чтобы понять, чья это речь
+  var FACE_LINES = 6;        // сколько последних реплик видно на половине экрана
   var HIDE_GRACE_MS = 4000;  // столько вкладка может побыть скрытой без разрыва
 
   var MINE = [{ code: 'ru', label: 'RU' }, { code: 'uk', label: 'UA' }];
   var THEIRS = [{ code: 'de', label: 'DE' }, { code: 'en', label: 'EN' }];
-  var MODES = [{ code: 'manual', label: 'Кнопками' }, { code: 'auto', label: 'Авто' }];
+  var MODES = [
+    { code: 'manual', label: 'Кнопками' },
+    { code: 'face', label: 'Лицом к лицу' },
+    { code: 'auto', label: 'Авто' }
+  ];
+  // Какой алфавит ждать от каждого языка — по нему в авто-режиме видно,
+  // чья это была речь, и лишняя сессия замолкает.
+  var SCRIPT = { ru: 'cyr', uk: 'cyr', de: 'lat', en: 'lat' };
+  // Подписи для собеседника — на его языке, не на русском.
+  var FACE_UI = {
+    de: { talk: '🎙 Sprechen', stop: '⏹ Stopp', hint: 'Tippen, sprechen, nochmal tippen' },
+    en: { talk: '🎙 Speak', stop: '⏹ Stop', hint: 'Tap, speak, tap again' }
+  };
   var SHORT = { de: 'DE', en: 'EN', ru: 'RU', uk: 'UA' };
   var SIDES = ['me', 'them'];
 
@@ -95,7 +111,7 @@
       if (MINE.some(function (l) { return l.code === saved.mine; })) prefs.mine = saved.mine;
       if (THEIRS.some(function (l) { return l.code === saved.theirs; })) prefs.theirs = saved.theirs;
       if (typeof saved.sound === 'boolean') prefs.sound = saved.sound;
-      if (saved.mode === 'auto' || saved.mode === 'manual') prefs.mode = saved.mode;
+      if (MODES.some(function (m) { return m.code === saved.mode; })) prefs.mode = saved.mode;
     }
   } catch (e) { /* битые настройки — берём по умолчанию */ }
 
@@ -132,6 +148,17 @@
     '<div class="live-btns hidden" id="liveAutoBox">' +
     '  <button class="live-side" id="liveAuto" type="button" aria-pressed="false"></button>' +
     '</div>' +
+    '<div class="live-face" id="liveFace">' +
+    '  <div class="face-pane them" id="facePaneThem">' +
+    '    <button class="face-btn" id="faceThem" type="button" aria-pressed="false"></button>' +
+    '    <div class="face-text" id="faceTextThem"></div>' +
+    '  </div>' +
+    '  <div class="face-pane me" id="facePaneMe">' +
+    '    <button class="face-btn" id="faceMe" type="button" aria-pressed="false"></button>' +
+    '    <div class="face-text" id="faceTextMe"></div>' +
+    '    <div class="face-status" id="faceStatus"></div>' +
+    '  </div>' +
+    '</div>' +
     '<div class="live-foot">' +
     '  <button class="hist-clear" id="liveBigLast" type="button">Крупно</button>' +
     '  <button class="hist-clear" id="liveCopy" type="button">Копировать</button>' +
@@ -157,6 +184,8 @@
     log: $('liveLog'), status: $('liveStatus'),
     manual: $('liveManual'), me: $('liveMe'), them: $('liveThem'),
     autoBox: $('liveAutoBox'), auto: $('liveAuto'),
+    face: $('liveFace'), faceMe: $('faceMe'), faceThem: $('faceThem'),
+    faceTextMe: $('faceTextMe'), faceTextThem: $('faceTextThem'), faceStatus: $('faceStatus'),
     bigLast: $('liveBigLast'), copy: $('liveCopy'), hist: $('liveHist'), wipe: $('liveWipe'),
     big: $('liveBig'), bigCard: $('liveBigCard'), bigText: $('liveBigText'), bigSrc: $('liveBigSrc'),
     bigFlip: $('liveBigFlip'), bigClose: $('liveBigClose'),
@@ -175,7 +204,7 @@
     // микрофон
     stream: null, micP: null, micGen: 0, inCtx: null, srcNode: null, workNode: null,
     // вывод
-    outCtx: null, playAt: 0, playing: [],
+    outCtx: null, playAt: 0, playing: [], queue: [], flush: 0,
     // субтитры
     log: [],           // реплики текущего разговора
     convId: 0,
@@ -223,6 +252,13 @@
     el.me.setAttribute('aria-pressed', String(S.active === 'me'));
     el.them.setAttribute('aria-pressed', String(S.active === 'them'));
     el.auto.setAttribute('aria-pressed', String(S.running));
+    var ui = FACE_UI[prefs.theirs] || FACE_UI.en;
+    el.faceMe.textContent = S.active === 'me' ? '⏹ Стоп' : '🎙 Говорить';
+    el.faceThem.textContent = S.active === 'them' ? ui.stop : ui.talk;
+    el.faceMe.setAttribute('aria-pressed', String(S.active === 'me'));
+    el.faceThem.setAttribute('aria-pressed', String(S.active === 'them'));
+    el.faceThem.lang = prefs.theirs;
+    root.classList.toggle('face-mode', prefs.mode === 'face');
     el.manual.classList.toggle('hidden', prefs.mode !== 'manual');
     el.autoBox.classList.toggle('hidden', prefs.mode !== 'auto');
     el.sound.textContent = prefs.sound ? '🔊' : '🔇';
@@ -257,6 +293,7 @@
     }
     el.status.textContent = text;
     el.status.classList.toggle('error', isErr);
+    el.faceStatus.textContent = isErr ? text : '';
   }
 
   // ---------- звук: вход ----------
@@ -380,23 +417,46 @@
 
   // ---------- звук: выход ----------
 
-  function play(b64) {
-    if (!prefs.sound || !S.outCtx) return;
+  // Модель шлёт звук мелкими кусками и рывками. Поэтому куски не
+  // проигрываются по одному, а собираются в общий буфер: раз в FLUSH_MS
+  // всё накопленное склеивается в один кусок и ставится в очередь встык.
+  // JITTER — запас, чтобы очередная порция успела прийти до конца текущей.
+  function decodePcm(b64) {
     var bin = atob(b64);
     var n = bin.length >> 1;
-    if (!n) return;
-    var buffer = S.outCtx.createBuffer(1, n, OUT_RATE);
-    var ch = buffer.getChannelData(0);
+    var out = new Float32Array(n);
     for (var i = 0; i < n; i++) {
       var v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
-      ch[i] = (v >= 32768 ? v - 65536 : v) / 32768;
+      out[i] = (v >= 32768 ? v - 65536 : v) / 32768;
     }
+    return out;
+  }
+
+  function play(b64) {
+    if (!prefs.sound || !S.outCtx) return;
+    var pcm = decodePcm(b64);
+    if (!pcm.length) return;
+    S.queue.push(pcm);
+    if (!S.flush) S.flush = setTimeout(flushAudio, FLUSH_MS);
+  }
+
+  function flushAudio() {
+    S.flush = 0;
+    if (!S.queue.length || !S.outCtx) return;
+    var total = 0;
+    S.queue.forEach(function (a) { total += a.length; });
+    var buffer = S.outCtx.createBuffer(1, total, OUT_RATE);
+    var ch = buffer.getChannelData(0), at = 0;
+    S.queue.forEach(function (a) { ch.set(a, at); at += a.length; });
+    S.queue = [];
+
+    var now = S.outCtx.currentTime;
+    if (S.playAt < now + JITTER) S.playAt = now + JITTER;   // отстали — начинаем с запасом
     var node = S.outCtx.createBufferSource();
     node.buffer = buffer;
     node.connect(S.outCtx.destination);
-    var at = Math.max(S.outCtx.currentTime + 0.02, S.playAt);
-    node.start(at);
-    S.playAt = at + buffer.duration;
+    node.start(S.playAt);
+    S.playAt += buffer.duration;
     S.playing.push(node);
     node.onended = function () {
       var k = S.playing.indexOf(node);
@@ -405,6 +465,9 @@
   }
 
   function stopPlayback() {
+    clearTimeout(S.flush);
+    S.flush = 0;
+    S.queue = [];
     S.playing.forEach(function (n) { try { n.stop(); } catch (e) { /* уже закончился */ } });
     S.playing = [];
     S.playAt = 0;
@@ -414,9 +477,59 @@
 
   function turnOf(sess) {
     if (!sess.turn) {
-      sess.turn = { side: sess.side, src: '', interim: '', dst: '', el: null, heardAt: 0, spokeAt: 0 };
+      sess.turn = {
+        side: sess.side, src: '', interim: '', dst: '', el: null,
+        heardAt: 0, spokeAt: 0,
+        // В авто обе сессии слышат всех. Пока не ясно, на каком языке
+        // говорили, звук этой сессии придерживается: иначе обе начинают
+        // озвучивать одновременно и получается каша.
+        allow: prefs.mode === 'auto' ? null : true,
+        held: [], holdTimer: 0
+      };
     }
     return sess.turn;
+  }
+
+  function scriptOf(text) {
+    if (/[\u0400-\u04FF]/.test(text)) return 'cyr';
+    if (/[A-Za-zÀ-ÿ]/.test(text)) return 'lat';
+    return '';
+  }
+
+  // Речь на целевом языке эта сессия переводить не должна — значит, говорил
+  // не тот, за кого она отвечает. Тогда её реплику и звук выбрасываем.
+  function decideTurn(sess, t, text) {
+    if (t.allow !== null) return;
+    var sc = scriptOf(text || '');
+    if (!sc) return;
+    t.allow = sc !== SCRIPT[sess.target];
+    clearTimeout(t.holdTimer);
+    if (t.allow) t.held.forEach(play);
+    t.held = [];
+    if (!t.allow) dropTurn(t);
+  }
+
+  function holdAudio(t, b64) {
+    t.held.push(b64);
+    if (t.holdTimer) return;
+    t.holdTimer = setTimeout(function () {   // расшифровки нет — пусть звучит
+      t.holdTimer = 0;
+      if (t.allow !== null) return;
+      t.allow = true;
+      t.held.forEach(play);
+      t.held = [];
+    }, GUESS_MS);
+  }
+
+  function dropTurn(t) {
+    clearTimeout(t.holdTimer);
+    t.held = [];
+    if (t.el && t.el.parentNode) t.el.parentNode.removeChild(t.el);
+    var k = S.log.indexOf(t);
+    if (k >= 0) S.log.splice(k, 1);
+    t.el = null;
+    if (S.big === t) hideBig();
+    renderFace();
   }
 
   function touch(sess) {
@@ -429,13 +542,22 @@
     clearTimeout(sess.pauseTimer);
     var t = sess.turn;
     sess.turn = null;
-    if (t && t.interim) { t.interim = ''; renderTurn(t); }
+    if (!t) return;
+    if (t.allow === null) {   // так и не поняли, чья речь — пусть звучит
+      clearTimeout(t.holdTimer);
+      t.holdTimer = 0;
+      t.allow = true;
+      t.held.forEach(play);
+      t.held = [];
+    }
+    if (t.interim) { t.interim = ''; renderTurn(t); }
   }
 
   function renderTurn(t) {
+    if (t.allow === false) return;
     // В авто обе сессии слышат всех; реплика показывается только у той,
     // что реально переводит, — иначе каждая фраза задвоится.
-    var visible = t.dst || (prefs.mode === 'manual' && (t.src || t.interim));
+    var visible = t.dst || (prefs.mode !== 'auto' && (t.src || t.interim));
     if (!visible) return;
     if (!t.el) {
       if (S.view !== 'log') showLog();
@@ -453,11 +575,14 @@
     t.el.querySelector('.lt-src').textContent = (t.src + (t.interim ? ' ' + t.interim : '')).trim();
     el.log.scrollTop = el.log.scrollHeight;
     if (S.big === t) fillBig(t);
+    renderFace();
   }
 
-  function addText(sess, kind, text, lang) {
+  function addText(sess, kind, text) {
     if (!text) return;
     var t = turnOf(sess);
+    if (kind !== 'dst') decideTurn(sess, t, text);
+    if (t.allow === false) return;
     if (kind === 'interim') {
       t.interim = text;
     } else if (kind === 'src') {
@@ -469,6 +594,32 @@
     if (!t.heardAt && kind !== 'dst') t.heardAt = Date.now();
     renderTurn(t);
     touch(sess);
+  }
+
+  // Каждая половина экрана показывает разговор на своём языке: моя — по-русски,
+  // половина собеседника — на его языке и вверх ногами, чтобы он читал напротив.
+  function faceLine(t, mineSide) {
+    if (mineSide) return t.side === 'me' ? t.src + (t.interim ? ' ' + t.interim : '') : t.dst;
+    return t.side === 'me' ? t.dst : t.src + (t.interim ? ' ' + t.interim : '');
+  }
+
+  function renderFace() {
+    if (prefs.mode !== 'face') return;
+    [[el.faceTextMe, true], [el.faceTextThem, false]].forEach(function (pair) {
+      var box = pair[0], mineSide = pair[1];
+      box.innerHTML = '';
+      var turns = S.log.slice(-FACE_LINES);
+      turns.forEach(function (t, i) {
+        var text = (faceLine(t, mineSide) || '').trim();
+        if (!text) return;
+        var d = document.createElement('div');
+        d.className = 'face-line' + (i === turns.length - 1 ? ' last' : '') +
+          (t.side === (mineSide ? 'me' : 'them') ? ' own' : '');
+        d.textContent = text;
+        box.appendChild(d);
+      });
+      box.scrollTop = box.scrollHeight;
+    });
   }
 
   // ---------- сессии ----------
@@ -616,11 +767,13 @@
       sc.modelTurn.parts.forEach(function (p) {
         if (!p.inlineData || !p.inlineData.data) return;
         var t = turnOf(sess);
+        if (t.allow === false) return;
         if (!t.spokeAt) {
           t.spokeAt = Date.now();
           if (t.heardAt) log(sess.side, 'озвучка через', t.spokeAt - t.heardAt, 'мс после первых слов');
         }
-        play(p.inlineData.data);
+        if (t.allow === null) holdAudio(t, p.inlineData.data);
+        else play(p.inlineData.data);
         touch(sess);
       });
     }
@@ -757,6 +910,7 @@
     S.convId = 0;
     hideBig();
     showEmpty();
+    renderFace();
   }
 
   function showEmpty() {
@@ -820,11 +974,15 @@
     S.log = [];
     el.log.innerHTML = '';
     c.turns.forEach(function (x) {
-      var t = { side: x.side, src: x.src, interim: '', dst: x.dst, el: null, heardAt: 0, spokeAt: 0 };
+      var t = {
+        side: x.side, src: x.src, interim: '', dst: x.dst, el: null,
+        heardAt: 0, spokeAt: 0, allow: true, held: [], holdTimer: 0
+      };
       S.view = 'log';
       renderTurn(t);
     });
     if (!S.log.length) showEmpty();
+    renderFace();
   }
 
   function copyLog() {
@@ -859,6 +1017,7 @@
     if (!el.log.children.length) showEmpty();
     syncButtons();
     updateStatus();
+    renderFace();
     lockScreen();
     warmUp();
     // «Назад» на Android закрывает окно, а не уходит со страницы.
@@ -886,6 +1045,7 @@
     stopListening();
     syncButtons();
     updateStatus();
+    renderFace();
   });
   syncButtons();
 
@@ -899,6 +1059,8 @@
   el.me.addEventListener('click', function () { pressSide('me'); });
   el.them.addEventListener('click', function () { pressSide('them'); });
   el.auto.addEventListener('click', pressAuto);
+  el.faceMe.addEventListener('click', function () { pressSide('me'); });
+  el.faceThem.addEventListener('click', function () { pressSide('them'); });
   el.sound.addEventListener('click', function () {
     prefs.sound = !prefs.sound;
     savePrefs();
